@@ -1,0 +1,26 @@
+name: hermes-agent-mixer
+version: 0.1.0
+description: A mixing desk for how much a Hermes agent may change - edits, scope, lines and deps knobs enforced in pre_tool_call
+author: Sahil Saghir
+license: MIT
+provides_hooks:
+  - pre_tool_call
+  - pre_llm_call
+provides_tools: []
+config_schema:
+  edits:
+    type: str
+    default: auto
+    description: "edit permission mode: ask, auto or plan"
+  scope:
+    type: list
+    default: []
+    description: "allow-list of glob patterns for file writes inside the project root"
+  lines:
+    type: str
+    default: "off"
+    description: "max lines changed per turn across write_file/patch, or 'off'"
+  deps:
+    type: str
+    default: ask
+    description: "new-dependency behaviour: allow, ask or block"

@@ -1,0 +1,29 @@
+[project]
+name = "hermes-agent-mixer"
+version = "0.1.0"
+description = "A mixing desk for how much a Hermes agent may change: edits, scope, lines and deps knobs"
+authors = [{ name = "Sahil Saghir" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.entry-points."hermes_agent.plugins"]
+hermes-agent-mixer = "hermes_agent_mixer"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: slow test that installs the plugin into a sandbox HERMES_HOME (deselect with -m 'not slow')",
+]
+
+[tool.setuptools]
+packages = ["hermes_agent_mixer"]
+
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
