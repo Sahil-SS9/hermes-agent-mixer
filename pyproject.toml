@@ -22,6 +22,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "slow: slow test that installs the plugin into a sandbox HERMES_HOME (deselect with -m 'not slow')",
+    "native: drives the real Hermes plugin loader; needs MIXER_NATIVE_PYTHON (skipped otherwise)",
 ]
 
 [tool.setuptools]

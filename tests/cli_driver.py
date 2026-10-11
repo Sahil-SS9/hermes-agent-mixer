@@ -6,8 +6,6 @@ import json
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-import pytest
-
 from hermes_agent_mixer import cli
 
 
@@ -46,7 +44,3 @@ class Rig:
         data = json.loads(out) if out.strip() else None
         return rc, data, err
 
-
-@pytest.fixture
-def rig(tmp_path):
-    return Rig(tmp_path)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.cli_driver import rig  # noqa: F401
 
 
 def pre(rig, tool, tool_input, sid="S1", prompt_id="p1", **extra):

@@ -103,3 +103,11 @@ def fresh_plugin():
 
     yield new
     plugin.reset_mixer()
+
+
+@pytest.fixture
+def rig(tmp_path):
+    """A throwaway home, config, state and project for driving the agent-mixer CLI and hooks."""
+    from tests.cli_driver import Rig
+
+    return Rig(tmp_path)

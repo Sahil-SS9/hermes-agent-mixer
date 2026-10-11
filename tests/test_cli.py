@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 
-from tests.cli_driver import rig  # noqa: F401
 
 
 def claude_pre(sid, proj, tool, tool_input, prompt_id="p1"):

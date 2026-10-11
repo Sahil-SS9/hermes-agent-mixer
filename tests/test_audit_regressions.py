@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_agent_mixer.core import diffcount
 from tests import legacy
 from tests.legacy import decisions
 from hermes_agent_mixer.hermes import plugin

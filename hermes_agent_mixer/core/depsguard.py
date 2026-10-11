@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from pathlib import PurePosixPath
 
 _MANIFEST_BASENAMES = {"package.json", "pyproject.toml", "cargo.toml", "go.mod"}
 

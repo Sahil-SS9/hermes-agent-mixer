@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.cli_driver import rig  # noqa: F401
 
 
 def mixer_hooks(data, event, name):

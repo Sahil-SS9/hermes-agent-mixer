@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-from tests.cli_driver import rig  # noqa: F401
 
 
 def pre(rig, tool, command, sid="X1", turn="t1"):

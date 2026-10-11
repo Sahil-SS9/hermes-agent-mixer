@@ -21,6 +21,15 @@ NAME = "hermes-agent-mixer"
 BASE_URL = "http://127.0.0.1:8091/v1"
 
 
+def _head() -> str:
+    """Short sha of the committed code under test (the installer clones HEAD, not the working tree)."""
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 def run_receipt(mode: str, evidence: Path) -> None:
     evidence = evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -74,7 +83,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
         config = (f"model:\n  provider: custom\n  default: auto\n  base_url: {BASE_URL}\n"
                   "  api_key: local-only\n" + config +
                   "  entries:\n    hermes-agent-mixer:\n      settings:\n"
-                  "        edits: auto\n        scope: ['src/**']\n        lines: off\n        deps: ask\n"
+                  "        edits: auto\n        scope: ['src/**']\n        lines: 0\n        deps: ask\n"
                   "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n")
         env.update(OPENAI_BASE_URL=BASE_URL, OPENAI_API_KEY="local-only")
         append(f"# Only model route: {BASE_URL}, model auto\n")
@@ -89,7 +98,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
     command("plugins", "doctor", NAME, "--ci")
 
     if mode == "install":
-        append("INSTALL PASS\n")
+        append(f"INSTALL PASS {_head()}\n")
     else:
         command("chat", "-q", "Create notes.txt in the project root containing hi",
                 "--provider", "custom", "--model", "auto", "--max-turns", "6", cwd=project)
@@ -106,7 +115,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
             append(f"Documented terminal workaround: notes.txt exists, content={note.read_text()!r}\n")
         else:
             append("notes.txt absent after run\n")
-        append("E2E PASS\n")
+        append(f"E2E PASS {_head()}\n")
     print(f"{mode} receipt: {log}")
 
 

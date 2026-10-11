@@ -76,7 +76,9 @@ elif args[:1] == ["chat"]:
     result = subprocess.run(["bash", str(REPO / "scripts" / "e2e_run.sh"), str(evidence)],
         env=env, cwd=REPO, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert (evidence / "e2e.log").read_text().splitlines()[-1] == "E2E PASS"
+    import re
+
+    assert re.fullmatch(r"E2E PASS [0-9a-f]{7,}", (evidence / "e2e.log").read_text().splitlines()[-1])
 
 
 def test_e2e_overrides_inherited_terminal_cwd(tmp_path):

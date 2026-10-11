@@ -1,7 +1,6 @@
 """agent-mixer doctor (X7): where things live, what is installed, and what is wrong."""
 from __future__ import annotations
 
-import os
 import sys
 
 from hermes_agent_mixer.core import settings

@@ -2,7 +2,6 @@
 https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md - contract-tested only."""
 from __future__ import annotations
 
-from tests.cli_driver import rig  # noqa: F401
 
 
 def event(rig, name, sid="G1", **fields):

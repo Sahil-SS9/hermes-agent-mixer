@@ -6,7 +6,6 @@ import json
 import pytest
 
 from hermes_agent_mixer.core import store as store_mod
-from tests.cli_driver import rig  # noqa: F401
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex", "gemini"])
