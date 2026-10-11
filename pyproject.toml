@@ -3,7 +3,7 @@ name = "hermes-agent-mixer"
 version = "0.1.0"
 description = "A mixing desk for how much a Hermes agent may change: edits, scope, lines and deps knobs"
 authors = [{ name = "Sahil Saghir" }]
-license = { text = "MIT" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
@@ -25,5 +25,5 @@ markers = [
 packages = ["hermes_agent_mixer"]
 
 [build-system]
-requires = ["setuptools>=69.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
