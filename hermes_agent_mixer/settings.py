@@ -3,6 +3,9 @@
 Raw values arrive from plugin config (possibly anything YAML gave) and from
 /mixer commands (strings). Everything is normalised here; invalid values fall
 back to defaults instead of breaking enforcement.
+
+The manifest declares lines as int with an optional default: "off" (disabled)
+is represented as the string sentinel; any positive number is the budget.
 """
 
 from __future__ import annotations
@@ -13,15 +16,15 @@ _DEPS_MODES = ("allow", "ask", "block")
 
 DEFAULT_EDITS = "auto"
 DEFAULT_SCOPE: list[str] = []
-DEFAULT_LINES = "off"
+LINES_OFF = "off"
 DEFAULT_DEPS = "ask"
 
 
 def normalise(raw: dict) -> dict:
     """Return validated knobs ``{edits, scope, lines, deps}``.
 
-    ``lines`` is the string "off" or a positive int. Invalid values keep the
-    documented default.
+    ``lines`` is always the string "off" or a positive int, so saved defaults
+    and session overrides agree regardless of the source text.
     """
     edits = _edit_mode(raw.get("edits"))
     scope = _scope(raw.get("scope"))
@@ -56,25 +59,23 @@ def _scope(value) -> list[str]:
 
 def _lines(value):
     if value is None:
-        return DEFAULT_LINES
+        return LINES_OFF
     if isinstance(value, bool):
-        return DEFAULT_LINES
+        return LINES_OFF
     if isinstance(value, int):
-        return value if value > 0 else DEFAULT_LINES
+        return value if value > 0 else LINES_OFF
     if isinstance(value, float) and value.is_integer():
-        return int(value) if value > 0 else DEFAULT_LINES
+        return int(value) if value > 0 else LINES_OFF
     if isinstance(value, str):
         text = value.strip().lower()
-        if text in ("", "off"):
-            return DEFAULT_LINES
-        if text == "on":
-            return DEFAULT_LINES
+        if text in ("", "off", "on"):
+            return LINES_OFF
         try:
             number = int(text)
         except ValueError:
-            return DEFAULT_LINES
-        return number if number > 0 else DEFAULT_LINES
-    return DEFAULT_LINES
+            return LINES_OFF
+        return number if number > 0 else LINES_OFF
+    return LINES_OFF
 
 
 def is_valid_knob(knob: str) -> bool:

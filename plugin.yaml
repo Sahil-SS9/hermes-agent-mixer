@@ -17,7 +17,7 @@ config_schema:
     default: []
     description: "allow-list of glob patterns for file writes inside the project root"
   lines:
-    type: str
+    type: int
     default: "off"
     description: "max lines changed per turn across write_file/patch, or 'off'"
   deps:
