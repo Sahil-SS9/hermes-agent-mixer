@@ -14,12 +14,36 @@ from hermes_agent_mixer import settings as settings_mod
 GLOBAL_SESSION = ""
 
 
+class LinesState:
+    """Per-turn, per-session line-budget counters keyed by (session, task)."""
+
+    def __init__(self) -> None:
+        self._used: dict[tuple[str, str], int] = {}
+
+    def used(self, session_id: str, task_id: str) -> int:
+        return self._used.get((session_id or "", task_id or ""), 0)
+
+    def add(self, session_id: str, task_id: str, lines: int) -> None:
+        if lines <= 0:
+            return
+        key = (session_id or "", task_id or "")
+        self._used[key] = self._used.get(key, 0) + lines
+
+    def reset_turn(self, session_id: str, task_id: str) -> None:
+        """Drop the counter at the turn boundary (pre_llm_call)."""
+        self._used.pop((session_id or "", task_id or ""), None)
+
+    def reset_all(self) -> None:
+        self._used.clear()
+
+
 class Mixer:
     """Per-session knob settings resolved against plugin config defaults."""
 
     def __init__(self, config_get: Callable[[str, Any], Any] | None = None):
         self._config_get = config_get or (lambda key, default=None: None)
         self._overrides: dict[str, dict[str, Any]] = {}
+        self.lines_state = LinesState()
 
     # -- resolution ------------------------------------------------------
 

@@ -41,12 +41,18 @@ def _pre_tool_call(tool_name: str = "", args: dict | None = None, task_id: str =
                    session_id: str = "", **kwargs: Any) -> dict[str, Any] | None:
     """Ordered decision for one tool call. None = allow."""
     mixer = get_mixer()
-    knobs = mixer.settings_for(session_id or task_id)
-    return decisions.evaluate(tool_name, args or {}, knobs)
+    session_key = (session_id or "").strip() or (task_id or "").strip()
+    knobs = mixer.settings_for(session_key)
+    return decisions.evaluate(
+        tool_name, args or {}, knobs, mixer.lines_state,
+        session_id=session_key, task_id=task_id or "",
+    )
 
 
 def _pre_llm_call(session_id: str = "", task_id: str = "", **kwargs: Any) -> None:
-    """Turn boundary. The lines counter reset is added with the lines knob (S3)."""
+    """Turn boundary: reset this turn's lines counter (fires once per turn)."""
+    session_key = (session_id or "").strip() or (task_id or "").strip()
+    get_mixer().lines_state.reset_turn(session_key, task_id or "")
     return None
 
 
