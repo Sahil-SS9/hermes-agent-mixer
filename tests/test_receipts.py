@@ -51,3 +51,54 @@ elif args[:1] == ["chat"]:
     log = evidence / ("e2e.log" if script == "e2e_run.sh" else "plugin-load.log")
     assert log.exists()
     assert "E2E PASS" not in log.read_text() and "INSTALL PASS" not in log.read_text()
+
+
+@pytest.mark.parametrize("timing", ["", " (0.01s)"])
+def test_e2e_accepts_only_real_host_block_log_with_optional_timing(tmp_path, timing):
+    fake = tmp_path / "fake-hermes"
+    fake.write_text('''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("FIXTURE ONLY VERSION")
+elif args[:2] == ["plugins", "list"]:
+    print("hermes-agent-mixer enabled FIXTURE ONLY")
+elif args[:1] == ["chat"]:
+    log = Path(os.environ["HERMES_HOME"]) / "logs" / "agent.log"
+    log.parent.mkdir()
+    log.write_text('WARNING agent.tool_executor: Tool write_file returned error'
+        + os.environ["FIXTURE_TIMING"] + ': {"error": "blocked by mixer:scope FIXTURE ONLY"}\\n')
+''', encoding="utf-8")
+    fake.chmod(0o700)
+    evidence = tmp_path / "evidence"
+    env = {**os.environ, "HERMES_BIN": str(fake), "FIXTURE_TIMING": timing}
+    result = subprocess.run(["bash", str(REPO / "scripts" / "e2e_run.sh"), str(evidence)],
+        env=env, cwd=REPO, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert (evidence / "e2e.log").read_text().splitlines()[-1] == "E2E PASS"
+
+
+def test_e2e_overrides_inherited_terminal_cwd(tmp_path):
+    fake = tmp_path / "fake-hermes"
+    fake.write_text('''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("FIXTURE ONLY VERSION")
+elif args[:2] == ["plugins", "list"]:
+    print("hermes-agent-mixer enabled FIXTURE ONLY")
+elif args[:1] == ["chat"]:
+    project = Path(os.environ["HERMES_HOME"]).parent / "project"
+    assert os.environ.get("TERMINAL_CWD") == str(project), "inherited cwd escaped the sandbox"
+    log = Path(os.environ["HERMES_HOME"]) / "logs" / "agent.log"
+    log.parent.mkdir()
+    log.write_text('Tool write_file returned error: {"error": "blocked by mixer:scope FIXTURE ONLY"}\\n')
+''', encoding="utf-8")
+    fake.chmod(0o700)
+    evidence = tmp_path / "evidence"
+    env = {**os.environ, "HERMES_BIN": str(fake), "TERMINAL_CWD": str(tmp_path / "unrelated")}
+    result = subprocess.run(["bash", str(REPO / "scripts" / "e2e_run.sh"), str(evidence)],
+        env=env, cwd=REPO, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.stdout, result.stderr)

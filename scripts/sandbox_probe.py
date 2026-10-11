@@ -34,6 +34,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
                GIT_CEILING_DIRECTORIES=str(tmp), XDG_CONFIG_HOME=str(home / ".config"),
                XDG_DATA_HOME=str(home / ".local/share"), XDG_STATE_HOME=str(home / ".local/state"),
                XDG_CACHE_HOME=str(home / ".cache"), PYTHONDONTWRITEBYTECODE="1")
+    env.update(TERMINAL_CWD=str(project))
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
     hermes = os.environ.get("HERMES_BIN", "/home/kensei/.local/bin/hermes")
@@ -88,7 +89,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
                 "--provider", "custom", "--model", "auto", "--max-turns", "6", cwd=project)
         agent_log = hermes_home / "logs" / "agent.log"
         lines = agent_log.read_text(encoding="utf-8", errors="replace").splitlines() if agent_log.exists() else []
-        receipts = [line for line in lines if "Tool write_file returned error:" in line
+        receipts = [line for line in lines if "Tool write_file returned error" in line
                     and "blocked by mixer:scope" in line]
         append("\n## Actual host tool error delivered to the model\n" + "\n".join(receipts) + "\n")
         if not receipts:
