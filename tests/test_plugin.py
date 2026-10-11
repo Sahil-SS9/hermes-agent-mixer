@@ -1,20 +1,33 @@
-"""Tests for plugin registration wiring and the sandbox install/load path."""
+"""Tests for plugin registration wiring, hook wiring and the sandbox install/load path."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
+from tests import conftest as conftest_mod
 from hermes_agent_mixer import plugin as mixer_plugin
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HERMES_BIN = shutil.which("hermes") or "/home/kensei/.local/bin/hermes"
+
+
+@pytest.fixture(autouse=True)
+def fresh_mixer():
+    mixer_plugin.reset_mixer()
+    yield
+    mixer_plugin.reset_mixer()
+
+
+def _hooked_ctx(settings: dict | None = None) -> conftest_mod.FakeCtx:
+    ctx = conftest_mod.FakeCtx(settings)
+    mixer_plugin.register(ctx)
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +72,90 @@ class TestRegisterWiring:
         handler = fake_ctx.commands["mixer"]["handler"]
         assert handler("")
         assert handler("edits auto")
+
+
+# ---------------------------------------------------------------------------
+# Hook wiring: pre_tool_call consults the decision engine with mixer settings
+# ---------------------------------------------------------------------------
+
+
+class TestHookWiring:
+    def test_pre_tool_call_uses_decision_engine_block(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx({"scope": ["src/**"]})
+        hook = ctx.hooks["pre_tool_call"][0]
+        result = hook(tool_name="write_file", args={"path": "nope/x.txt", "content": "x"}, task_id="t1")
+        assert result is not None
+        assert result["action"] == "block"
+        assert "scope" in result["message"]
+
+    def test_pre_tool_call_uses_decision_engine_allow(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx({"scope": ["src/**"]})
+        hook = ctx.hooks["pre_tool_call"][0]
+        assert hook(tool_name="write_file", args={"path": "src/a.py", "content": "x"}, task_id="t1") is None
+
+    def test_plugin_uses_config_defaults_from_ctx(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx({"edits": "plan"})
+        hook = ctx.hooks["pre_tool_call"][0]
+        result = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1")
+        assert result is not None
+        assert result["action"] == "block"
+
+    def test_session_override_changes_hook_behaviour(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx()
+        hook = ctx.hooks["pre_tool_call"][0]
+        mixer_plugin.get_mixer().set_session("sess-a", "edits", "plan")
+        result = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1", session_id="sess-a")
+        assert result is not None
+        assert result["action"] == "block"
+
+    def test_sessions_are_isolated(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx()
+        hook = ctx.hooks["pre_tool_call"][0]
+        mixer_plugin.get_mixer().set_session("sess-a", "edits", "plan")
+
+        blocked = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1", session_id="sess-a")
+        other = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1", session_id="sess-b")
+        no_session = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1")
+        assert blocked is not None and blocked["action"] == "block"
+        assert other is None
+        assert no_session is None
+
+    def test_reset_session_clears_overrides(self):
+        mixer = mixer_plugin.get_mixer()
+        mixer.set_session("sess-a", "edits", "plan")
+        mixer.reset_session("sess-a")
+        assert mixer.settings_for("sess-a")["edits"] == "auto"
+
+    def test_hook_accepts_full_host_payload(self, tmp_path, monkeypatch):
+        """The hook must tolerate every kwarg the host sends pre_tool_call."""
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx()
+        hook = ctx.hooks["pre_tool_call"][0]
+        result = hook(
+            tool_name="write_file", args={"path": "x", "content": ""}, task_id="t1",
+            session_id="s", tool_call_id="c", turn_id="tr", api_request_id="a",
+            middleware_trace=[], telemetry_schema_version=1,
+        )
+        assert result is None
+
+    def test_pre_llm_call_returns_none(self):
+        ctx = _hooked_ctx()
+        hook = ctx.hooks["pre_llm_call"][0]
+        assert hook(
+            session_id="s", task_id="t", turn_id="tr", user_message="m",
+            conversation_history=[], is_first_turn=True, model="m", platform="cli",
+        ) is None
+
+    def test_missing_args_is_tolerated(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx = _hooked_ctx()
+        hook = ctx.hooks["pre_tool_call"][0]
+        hook(tool_name="write_file", task_id="t1")  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +243,7 @@ class TestSandboxInstallAndLoad:
     """Install once per test session, then assert the observable outcomes.
 
     Each install takes about a minute (real clone + managed env), so a
-    module-scoped fixture keeps the suite well inside the five-minute budget.
+    class-scoped fixture keeps the suite well inside the five-minute budget.
     """
 
     @pytest.fixture(scope="class")
