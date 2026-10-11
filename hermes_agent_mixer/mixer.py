@@ -7,6 +7,7 @@ a process-wide fallback when no session id is available (one-session surfaces).
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any, Callable
 
 from hermes_agent_mixer import settings as settings_mod
@@ -15,31 +16,48 @@ GLOBAL_SESSION = ""
 
 
 class LinesState:
-    """Per-turn, per-session line-budget counters keyed by (session, task)."""
+    """Current-turn counters, with atomic admission for concurrent tool calls."""
 
     def __init__(self) -> None:
         self._used: dict[tuple[str, str], int] = {}
+        self._lock = RLock()
 
     def used(self, session_id: str, task_id: str) -> int:
-        return self._used.get((session_id or "", task_id or ""), 0)
+        with self._lock:
+            return self._used.get((session_id or "", task_id or ""), 0)
 
     def add(self, session_id: str, task_id: str, lines: int) -> None:
         if lines <= 0:
             return
         key = (session_id or "", task_id or "")
-        self._used[key] = self._used.get(key, 0) + lines
+        with self._lock:
+            self._used[key] = self._used.get(key, 0) + lines
+
+    def reserve(self, session_id: str, task_id: str, lines: int, budget: int) -> tuple[bool, int]:
+        """Check and reserve together; return (allowed, usage before this call)."""
+        key = (session_id or "", task_id or "")
+        with self._lock:
+            used = self._used.get(key, 0)
+            if used + lines > budget:
+                return False, used
+            self._used[key] = used + lines
+            return True, used
 
     def reset_turn(self, session_id: str, task_id: str) -> None:
-        """Drop the counter at the turn boundary (pre_llm_call)."""
-        self._used.pop((session_id or "", task_id or ""), None)
+        """Discard the session's previous turn even if its task id changed."""
+        session = session_id or ""
+        with self._lock:
+            self._used = {key: used for key, used in self._used.items() if key[0] != session}
 
     def session_used(self, session_id: str) -> int:
-        """Total lines used across this session's turn counters (for the board)."""
+        """Current-turn usage only; previous turns are removed at pre_llm_call."""
         key = session_id or ""
-        return sum(value for (session, _task), value in self._used.items() if session == key)
+        with self._lock:
+            return sum(value for (session, _task), value in self._used.items() if session == key)
 
     def reset_all(self) -> None:
-        self._used.clear()
+        with self._lock:
+            self._used.clear()
 
 
 class Mixer:

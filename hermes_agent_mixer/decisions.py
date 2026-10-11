@@ -204,13 +204,12 @@ def _lines_directive(tool_name: str, args: dict[str, Any], root_dir: Path,
                 for _path, before, after in proposed)
     if total <= 0:
         return None
-    used = counters.used(session_key, task_id)
+    allowed, used = counters.reserve(session_key, task_id, total, lines_budget)
     remaining = lines_budget - used
-    if used + total > lines_budget:
+    if not allowed:
         return {
             "action": "block",
             "message": _LINES_MESSAGE.format(need=total, used=used, budget=lines_budget,
                                              remaining=max(remaining, 0)),
         }
-    counters.add(session_key, task_id, total)
     return None

@@ -260,5 +260,5 @@ def test_subagent_counters_isolated_from_parent(tmp_path, monkeypatch):
     child = hook(tool_name="write_file", args={"path": "a.txt", "content": "1\n2\n3\n"}, task_id="child-turn",
                  session_id="child-session")
     mixer_plugin.reset_mixer()
-    assert ok is not None or True
+    assert ok is None, "parent's first call must fit the configured budget"
     assert child is None, "child session starts with a fresh budget"

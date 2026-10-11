@@ -110,4 +110,5 @@ def _on_unload() -> None:
     mixer = _MIXER
     if mixer is not None:
         mixer.on_unload()
+    reset_mixer()
     _HOOKS_WIRED = []
