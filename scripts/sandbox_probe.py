@@ -19,6 +19,8 @@ sys.path.insert(0, str(REPO))
 from scripts import sandbox_home  # noqa: E402
 NAME = "hermes-agent-mixer"
 BASE_URL = "http://127.0.0.1:8091/v1"
+# A cold local model can take minutes for its first reply; raise this with MIXER_RECEIPT_TIMEOUT.
+TIMEOUT = int(os.environ.get("MIXER_RECEIPT_TIMEOUT", "240"))
 
 
 def _head() -> str:
@@ -68,7 +70,7 @@ def run_receipt(mode: str, evidence: Path) -> None:
         argv = [hermes, *args]
         append(f"\n## {shlex.join(argv)}\n")
         try:
-            result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=240)
+            result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:
             append(f"COMMAND FAIL: {exc}\n")
             raise SystemExit(1) from exc
