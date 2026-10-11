@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hermes_agent_mixer import depsguard, diffcount, scope as scope_mod
+from hermes_agent_mixer import depsguard, diffcount, patches, scope as scope_mod
 from hermes_agent_mixer import terminal as terminal_mod
 
 _FILE_TOOLS = ("write_file", "patch")
@@ -66,10 +66,21 @@ def evaluate(tool_name: str, args: dict[str, Any], knobs: dict[str, Any],
     if tool_name in _FILE_TOOLS:
         if edits == "plan":
             return {"action": "block", "message": _PLAN_MESSAGE_WRITE.format(tool=tool_name)}
-        path_text = str(args.get("path") or "")
-        message = scope_mod.check_scope(path_text, scope_globs, root_dir)
-        if message:
-            return {"action": "block", "message": message}
+        if tool_name == "patch" and args.get("mode") == "patch":
+            try:
+                targets = patches.paths(str(args.get("patch") or ""))
+            except ValueError:
+                targets = []
+            if not targets:
+                return {"action": "block", "message":
+                        "blocked by mixer:scope: cannot identify bulk-patch targets. "
+                        "Use a valid patch or separate path-based edits."}
+        else:
+            targets = [str(args.get("path") or "")]
+        for path_text in targets:
+            message = scope_mod.check_scope(path_text, scope_globs, root_dir)
+            if message:
+                return {"action": "block", "message": message}
         deps_directive = _manifest_deps_directive(tool_name, args, root_dir, deps_mode)
         if deps_directive:
             return deps_directive
