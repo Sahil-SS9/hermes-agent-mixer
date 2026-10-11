@@ -1,22 +1,21 @@
-"""Diff-based lines counting for the lines knob.
+"""Simulate file-tool changes without writes, then count real added/removed lines.
 
-Counts from a simulated before/after diff (added + removed lines) per call;
-the budget accumulates the sum per turn upstream. The V4A patch dialect is
-parsed into hunks and applied to the in-memory file content so the count
-matches a real diff; unparseable patches fall back to counting +/- lines.
+Bulk patches use separate file before-states and an in-memory overlay for
+Add/Update/Delete/Move. Unknown simulations return None; active policy stages
+fail closed rather than treating an unknown diff as zero.
 """
-
 from __future__ import annotations
 
 import difflib
 from pathlib import Path
 from typing import Any
 
+from hermes_agent_mixer import patches
+
 
 def count_diff_lines(before: str | None, after: str | None) -> tuple[int, int]:
-    """(added, removed) between two file states via one unified diff."""
-    before_lines = (before or "").splitlines(keepends=False)
-    after_lines = (after or "").splitlines(keepends=False)
+    before_lines = (before or "").splitlines()
+    after_lines = (after or "").splitlines()
     matcher = difflib.SequenceMatcher(a=before_lines, b=after_lines, autojunk=False)
     added = removed = 0
     for op, a1, a2, b1, b2 in matcher.get_opcodes():
@@ -27,135 +26,40 @@ def count_diff_lines(before: str | None, after: str | None) -> tuple[int, int]:
     return added, removed
 
 
-# -- simulations -------------------------------------------------------------
-
-
 def _replace_result(before: str, old: str, new: str, replace_all: bool) -> str | None:
-    if not isinstance(old, str) or not isinstance(new, str):
+    if not isinstance(old, str) or not isinstance(new, str) or old not in before:
         return None
-    if old not in before:
-        # The real patch will fail; count nothing.
-        return None
-    if replace_all:
-        return before.replace(old, new)
-    return before.replace(old, new, 1)
-
-
-def _parse_v4a_updates(patch_text: str) -> list[tuple[str, list[list[tuple[str, str]]]]]:
-    """Extract (path, hunk_sections) from a V4A patch body.
-
-    Each ``@@``-separated section contributes one (find, replace) pair:
-    context+removed lines form the find text, context+added the replacement.
-    """
-    updates: list[tuple[str, list[list[tuple[str, str]]]]] = []
-    current_path: str | None = None
-    sections: list[list[tuple[str, str]]] = []
-    current: list[tuple[str, str]] = []
-    saw_body = False
-    for raw in (patch_text or "").splitlines():
-        if raw.startswith("*** Update File:"):
-            if current_path and current:
-                sections.append(current)
-            if current_path and sections:
-                updates.append((current_path, sections))
-            current_path = raw.split(":", 1)[1].strip()
-            sections = []
-            current = []
-            saw_body = True
-        elif raw.startswith("@@"):
-            if current:
-                sections.append(current)
-            current = []
-        elif raw.startswith("*** Begin Patch") or raw.startswith("*** End Patch"):
-            continue
-        elif raw.startswith("*** "):
-            continue
-        elif raw:
-            kind = raw[0]
-            if kind in (" ", "-", "+"):
-                current.append(("context" if kind == " " else
-                                ("removed" if kind == "-" else "added"), raw[1:]))
-            saw_body = True
-    if current:
-        sections.append(current)
-    if current_path and sections:
-        updates.append((current_path, sections))
-    return updates if saw_body else []
+    return before.replace(old, new) if replace_all else before.replace(old, new, 1)
 
 
 def _apply_v4a(before: str, hunks: list[list[tuple[str, str]]]) -> str | None:
-    """Apply parsed hunk sections to the file content; None when an anchor is missing."""
     result = before
-    for hunks_section in hunks:
-        find_lines: list[str] = []
-        replace_lines: list[str] = []
-        for kind, text in hunks_section:
-            if kind in ("context", "removed"):
-                find_lines.append(text)
-            if kind in ("context", "added"):
-                replace_lines.append(text)
-        find = "\n".join(find_lines) + "\n" if find_lines else ""
-        replace = "\n".join(replace_lines) + "\n" if replace_lines else ""
-        if not find and not replace:
+    for section in hunks:
+        find_lines = [text for kind, text in section if kind in (" ", "-")]
+        replace_lines = [text for kind, text in section if kind in (" ", "+")]
+        find, replacement = "\n".join(find_lines), "\n".join(replace_lines)
+        if find == replacement:
             continue
-        if not find:
-            result = result.rstrip("\n") + "\n" + replace
+        if not find_lines:
+            result = (result.rstrip("\n") + "\n" if result else "") + replacement + "\n"
         elif find not in result:
-            return None  # anchor missing: conservative fallback upstream
+            return None
         else:
-            result = result.replace(find, replace, 1)
+            result = result.replace(find, replacement, 1)
     return result
 
 
 def simulate_patch_result(before: str, args: dict[str, Any]) -> str | None:
-    """Proposed file content for a patch call; None when not simulatable."""
-    mode = (args.get("mode") or "replace")
-    if mode == "patch":
-        text = args.get("patch")
-        if not isinstance(text, str):
+    if args.get("mode") == "patch":
+        try:
+            operations = patches.parse(str(args.get("patch") or ""))
+        except ValueError:
             return None
-        updates = _parse_v4a_updates(text)
-        result = before
-        for _path, hunks in updates:
-            applied = _apply_v4a(result, hunks)
-            if applied is None:
-                return None
-            result = applied
-        return result
+        if len(operations) != 1 or operations[0].kind != "Update":
+            return None
+        return _apply_v4a(before, operations[0].hunks)
     return _replace_result(before, args.get("old_string") or "", args.get("new_string") or "",
                            bool(args.get("replace_all")))
-
-
-def read_before_text(tool_name: str, args: dict[str, Any], root: Path | None = None) -> str | None:
-    """Current on-disk content for the call's path (None when it has none)."""
-    path_value = args.get("path") if isinstance(args, dict) else None
-    return _read_before(path_value, root)
-
-
-def simulate(tool_name: str, args: dict[str, Any], root: Path | None = None) -> str | None:
-    """Proposed after-text for a write_file/patch call; None when unknown/unreadable."""
-    if not isinstance(args, dict):
-        args = {}
-    if tool_name == "write_file":
-        content = args.get("content")
-        return content if isinstance(content, str) else None
-    if tool_name == "patch":
-        before = _read_before(args.get("path"), root)
-        before_text = before if before is not None else ""
-        return simulate_patch_result(before_text, args)
-    return None
-
-
-def _estimate_patch(before_text: str, args: dict[str, Any], root: Path | None) -> tuple[int, int]:
-    after = simulate_patch_result(before_text, args if isinstance(args, dict) else {})
-    if after is None:
-        # Not simulatable: conservative +/- count for V4A patches, zero otherwise.
-        if (args.get("mode") or "replace") == "patch" and isinstance(args.get("patch"), str):
-            added = sum(1 for line in args["patch"].splitlines() if line.startswith("+"))
-            removed = sum(1 for line in args["patch"].splitlines() if line.startswith("-"))
-            return (added, removed)
-        return (0, 0)
-    return count_diff_lines(before_text, after)
 
 
 def _read_before(path_value: Any, root: Path | None) -> str | None:
@@ -170,17 +74,89 @@ def _read_before(path_value: Any, root: Path | None) -> str | None:
         return None
 
 
-def estimate(tool_name: str, args: dict[str, Any], root: Path | None = None) -> tuple[int, int]:
-    """Simulated (added, removed) for a write_file/patch call, (0, 0) if unknown."""
-    if tool_name not in ("write_file", "patch"):
-        return (0, 0)
-    path_value = args.get("path") if isinstance(args, dict) else None
-    before = _read_before(path_value, root) if tool_name == "patch" else _read_before(path_value, root)
+def read_before_text(tool_name: str, args: dict[str, Any], root: Path | None = None) -> str | None:
+    return _read_before(args.get("path"), root)
+
+
+def simulate(tool_name: str, args: dict[str, Any], root: Path | None = None) -> str | None:
     if tool_name == "write_file":
-        new_content = args.get("content") if isinstance(args, dict) else None
-        if not isinstance(new_content, str):
-            return (0, 0)
-        return count_diff_lines(before, new_content)
-    # patch: simulate the result from the real before-state
-    before_text = before if before is not None else ""
-    return _estimate_patch(before_text, args, root)
+        content = args.get("content")
+        return content if isinstance(content, str) else None
+    if tool_name == "patch":
+        return simulate_patch_result(_read_before(args.get("path"), root) or "", args)
+    return None
+
+
+def _bulk_changes(args: dict[str, Any], root: Path | None) -> list[tuple[str, str | None, str | None]] | None:
+    try:
+        operations = patches.parse(str(args.get("patch") or ""))
+    except ValueError:
+        return None
+    if not operations:
+        return None
+    original: dict[str, str | None] = {}
+    overlay: dict[str, str | None] = {}
+
+    def key(path: str) -> str:
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            candidate = (root or Path.cwd()) / candidate
+        return str(candidate.resolve())
+
+    def read(path: str) -> str | None:
+        if path not in original:
+            original[path] = _read_before(path, root)
+            overlay[path] = original[path]
+        return overlay[path]
+
+    for op in operations:
+        path = key(op.path)
+        before = read(path)
+        if op.kind == "Update":
+            if before is None:
+                return None
+            after = _apply_v4a(before, op.hunks)
+            if after is None:
+                return None
+            overlay[path] = after
+        elif op.kind == "Add":
+            if before is not None:
+                return None  # host refuses Add on an occupied path
+            added = [text for hunk in op.hunks for kind, text in hunk if kind == "+"]
+            overlay[path] = "\n".join(added) + ("\n" if added else "")
+        elif op.kind == "Delete":
+            if before is None:
+                return None
+            overlay[path] = None
+        elif op.kind == "Move":
+            if before is None or op.destination is None:
+                return None
+            destination = key(op.destination)
+            if read(destination) is not None:
+                return None
+            overlay[destination] = before
+            overlay[path] = None
+    return [(path, before, overlay[path]) for path, before in original.items()]
+
+
+def changes(tool_name: str, args: dict[str, Any], root: Path | None = None) -> list[tuple[str, str | None, str | None]] | None:
+    """All proposed path/before/after triples; None means policy cannot simulate."""
+    if tool_name == "patch" and args.get("mode") == "patch":
+        return _bulk_changes(args, root)
+    path = args.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    after = simulate(tool_name, args, root)
+    if after is None:
+        return None
+    return [(path, _read_before(path, root), after)]
+
+
+def estimate(tool_name: str, args: dict[str, Any], root: Path | None = None) -> tuple[int, int]:
+    if tool_name not in ("write_file", "patch"):
+        return 0, 0
+    proposed = changes(tool_name, args, root)
+    if proposed is None:
+        return 0, 0  # estimate only; the decision engine blocks unknown active budgets
+    diffs = [count_diff_lines(before, after) for _path, before, after in proposed]
+    return sum(added for added, _removed in diffs), sum(removed for _added, removed in diffs)

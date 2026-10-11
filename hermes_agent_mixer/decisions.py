@@ -126,14 +126,18 @@ def _manifest_deps_directive(tool_name: str, args: dict[str, Any], root_dir: Pat
                              deps_mode: str) -> dict[str, str] | None:
     if deps_mode not in ("block", "ask"):
         return None
-    path_text = str(args.get("path") or "")
-    if not _is_manifest_path(path_text):
+    targets = (patches.paths(str(args.get("patch") or ""))
+               if tool_name == "patch" and args.get("mode") == "patch"
+               else [str(args.get("path") or "")])
+    if not any(_is_manifest_path(path) for path in targets):
         return None
-    before = diffcount.read_before_text(tool_name, args, root_dir)
-    after = diffcount.simulate(tool_name, args, root_dir)
-    if after is None:
-        return None  # not simulatable: cannot judge new entries
-    names = depsguard.detect_new_deps(path_text, before, after)
+    proposed = diffcount.changes(tool_name, args, root_dir)
+    if proposed is None:
+        return {"action": "block", "message":
+                "blocked by mixer:deps: cannot inspect the proposed manifest change. "
+                "Use an exact path-based edit or fix the patch anchors."}
+    names = sorted({name for path, before, after in proposed if _is_manifest_path(path)
+                    for name in depsguard.detect_new_deps(path, before, after)})
     if not names:
         return None
     shown = ", ".join(names)
@@ -191,8 +195,13 @@ def _lines_directive(tool_name: str, args: dict[str, Any], root_dir: Path,
     if state is None or not isinstance(lines_budget, int):
         return None
     counters = state.lines_state if hasattr(state, "lines_state") else state
-    added, removed = diffcount.estimate(tool_name, args, root_dir)
-    total = added + removed
+    proposed = diffcount.changes(tool_name, args, root_dir)
+    if proposed is None:
+        return {"action": "block", "message":
+                "blocked by mixer:lines: cannot count this change from a real diff. "
+                "Use an exact path-based edit or fix the patch anchors."}
+    total = sum(sum(diffcount.count_diff_lines(before, after))
+                for _path, before, after in proposed)
     if total <= 0:
         return None
     used = counters.used(session_key, task_id)
