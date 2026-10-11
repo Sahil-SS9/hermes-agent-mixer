@@ -10,12 +10,16 @@ from __future__ import annotations
 from typing import Any
 
 from hermes_agent_mixer import decisions
+from hermes_agent_mixer.board import handle_command as _board_handle
 from hermes_agent_mixer.mixer import Mixer
+from hermes_agent_mixer import session_key as _session_key_mod
 
 _HOOKS_WIRED: list[str] = []
 
 _MIXER: Mixer | None = None
 _CONFIG_GET: Any = None
+_CONFIG_SET: Any = None
+_current_session_key = _session_key_mod.current_session_key
 
 
 def get_mixer() -> Mixer:
@@ -28,9 +32,10 @@ def get_mixer() -> Mixer:
 
 def reset_mixer() -> None:
     """Drop the process-wide Mixer (test/reset seam)."""
-    global _MIXER, _CONFIG_GET
+    global _MIXER, _CONFIG_GET, _CONFIG_SET
     _MIXER = None
     _CONFIG_GET = None
+    _CONFIG_SET = None
 
 
 def _no_config(key: str, default=None):
@@ -57,14 +62,35 @@ def _pre_llm_call(session_id: str = "", task_id: str = "", **kwargs: Any) -> Non
 
 
 def _mixer_command(raw_args: str = "") -> str | None:
-    """Scaffold placeholder; the real board arrives with S4."""
-    return "Agent Mixer: scaffolding in place (knobs land in S2-S4)"
+    """/mixer board and subcommands; writes via the host-owned config writer."""
+    session = _current_session_key()
+    mixer = get_mixer()
+    return _board_handle(
+        raw_args, mixer, session,
+        save=_CONFIG_SET,
+        approvals_mode=_approvals_mode(),
+    )
+
+
+def _approvals_mode() -> str | None:
+    """Hermes' current approvals mode, for context display only.
+
+    Plugins have no ctx API for top-level config; this mirrors how bundled
+    plugins read host config (guarded, display-only)."""
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        mode = ((load_config_readonly() or {}).get("approvals") or {}).get("mode")
+        return str(mode) if isinstance(mode, str) and mode else None
+    except Exception:
+        return None
 
 
 def register(ctx: Any) -> None:
     """Wire Agent Mixer's hooks, command and unload callback into the host."""
-    global _CONFIG_GET
+    global _CONFIG_GET, _CONFIG_SET
     _CONFIG_GET = ctx.get_config
+    _CONFIG_SET = getattr(ctx, "set_config", None)
     ctx.register_hook("pre_tool_call", _pre_tool_call)
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_command(

@@ -33,6 +33,11 @@ class LinesState:
         """Drop the counter at the turn boundary (pre_llm_call)."""
         self._used.pop((session_id or "", task_id or ""), None)
 
+    def session_used(self, session_id: str) -> int:
+        """Total lines used across this session's turn counters (for the board)."""
+        key = session_id or ""
+        return sum(value for (session, _task), value in self._used.items() if session == key)
+
     def reset_all(self) -> None:
         self._used.clear()
 
