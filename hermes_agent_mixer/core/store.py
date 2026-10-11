@@ -115,6 +115,26 @@ def _unlock_file(handle: Any) -> None:
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+@contextlib.contextmanager
+def file_lock(path: str, wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
+    """Exclusive advisory lock on ``path`` (created if missing); StoreLockTimeout after ``wait`` seconds."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a+", encoding="utf-8") as handle:
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                _lock_file(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise StoreLockTimeout(f"could not lock {path} within {wait:.0f}s") from None
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            _unlock_file(handle)
+
+
 class FileStore:
     """One JSON file per session under ``root``; one fixed ``.lock`` file for the whole store."""
 
@@ -130,23 +150,10 @@ class FileStore:
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[Tx]:
-        os.makedirs(self.root, exist_ok=True)
-        with open(os.path.join(self.root, ".lock"), "a+", encoding="utf-8") as handle:
-            deadline = time.monotonic() + self.lock_wait
-            while True:
-                try:
-                    _lock_file(handle)
-                    break
-                except OSError:
-                    if time.monotonic() >= deadline:
-                        raise StoreLockTimeout(f"could not lock {self.root} within {self.lock_wait:.0f}s") from None
-                    time.sleep(0.02)
-            try:
-                tx = _FileTx(self)
-                yield tx
-                tx.flush()
-            finally:
-                _unlock_file(handle)
+        with file_lock(os.path.join(self.root, ".lock"), self.lock_wait):
+            tx = _FileTx(self)
+            yield tx
+            tx.flush()
 
 
 class _FileTx(Tx):
@@ -216,6 +223,4 @@ class _FileTx(Tx):
             tmp = f"{path}.{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as handle:
                 json.dump({"sid": sid, "record": record}, handle, sort_keys=True)
-                handle.flush()
-                os.fsync(handle.fileno())
             os.replace(tmp, path)

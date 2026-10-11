@@ -14,7 +14,6 @@ from hermes_agent_mixer.core.calls import Call, Decision
 from hermes_agent_mixer.core.store import MemoryStore
 
 MAX_DEPTH = 16
-TOUCH_EVERY = 3600.0
 
 
 class TurnBudget:
@@ -61,8 +60,7 @@ class Mixer:
             record = {"overrides": {}, "parent": None, "turn": None, "used": 0, "touched": now, "cwd": cwd}
             tx.put(sid, record)
         else:
-            if now - float(record.get("touched", 0.0)) > TOUCH_EVERY or "touched" not in record:
-                record["touched"] = now
+            record["touched"] = now
             if cwd and record.get("cwd") != cwd:
                 record["cwd"] = cwd
         return record
@@ -132,11 +130,18 @@ class Mixer:
             if parent and self._key(parent) != sid:
                 self._link(tx, sid, self._key(parent), cwd)
                 record = tx.get(sid)
-            if not record.get("parent"):
+            if not record.get("parent") and (turn_id is None or record.get("turn") != turn_id):
                 record["used"] = 0
                 record["turn"] = turn_id
             record["touched"] = self._clock()
             tx.prune(self._clock(), self.max_idle, self.max_sessions)
+
+    def touch(self, session_id: str, cwd: str | None = None) -> None:
+        """Record that a session was seen (and where), without starting a turn."""
+        sid = self._key(session_id)
+        if sid:
+            with self.store.transaction() as tx:
+                self._ensure(tx, sid, cwd)
 
     def decide(self, session_id: str, call: Call, ports: Any, *, turn_id: str | None = None,
                task_id: str | None = None, cwd: str | None = None, extra: dict | None = None) -> Decision | None:

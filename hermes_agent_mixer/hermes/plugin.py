@@ -106,7 +106,7 @@ def _pre_llm_call(session_id: str = "", task_id: str = "", turn_id: str = "", pa
         return None
     parent = (parent_session_id or "").strip()
     child = bool(parent) or mixer.parent_of(sid) is not None
-    mixer.begin_turn(sid, turn_id or None, parent=parent or None)
+    mixer.begin_turn(sid, None, parent=parent or None)  # every pre_llm_call is a new turn
     if not child:
         key = host.session_env("HERMES_SESSION_KEY").strip()
         if key:
