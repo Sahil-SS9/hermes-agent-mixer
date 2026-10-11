@@ -1,93 +1,131 @@
-"""Terminal command classification: splitting, read-only allowlist, redirects.
+"""Quote-aware, conservative terminal classification for plan mode and deps.
 
-Used by plan mode (every segment must be read-only) and the deps guard
-(S3). Splitting respects quotes via shlex.
+This is an allowlist of ordinary reads, not a shell interpreter or a sandbox.
+Only unquoted shell operators split segments or count as redirects.
 """
-
 from __future__ import annotations
 
 import shlex
 
-_SIMPLE_READ_ONLY = {
-    "ls", "cat", "head", "tail", "grep", "rg", "wc", "tree", "pwd", "which", "env",
-}
-
+_SIMPLE_READ_ONLY = {"ls", "cat", "head", "tail", "grep", "rg", "wc", "tree", "pwd", "which"}
 _GIT_READ_ONLY_SUBS = {"status", "diff", "log", "show", "branch", "rev-parse"}
+_FIND_WRITE_FLAGS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+_BRANCH_READ_FLAGS = {"-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--list",
+                      "--show-current", "--color", "--no-color", "--column", "--no-column", "--ignore-case"}
+_BRANCH_VALUE_FLAGS = {"--sort", "--format", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at"}
 
-_GIT_BRANCH_WRITE_FLAGS = {
-    "-d", "-D", "-m", "-M", "-c", "-C", "-u", "-f",
-    "--delete", "--move", "--copy", "--set-upstream", "--force",
-}
 
-_FIND_WRITE_FLAGS = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
+def _segments(command: str) -> list[tuple[list[str], bool]]:
+    """Token lists plus a flag for unapproved shell syntax, retaining quote provenance."""
+    result: list[tuple[list[str], bool]] = []
+    raw: list[str] = []
+    quote = ""
+    escaped = False
+    unsafe = False
 
-_OPERATORS = {";", "&&", "||", "|"}
+    def finish() -> None:
+        nonlocal raw, unsafe
+        text = "".join(raw)
+        if text.strip():
+            try:
+                result.append((shlex.split(text), unsafe))
+            except ValueError:
+                result.append(([text], True))
+        raw = []
+        unsafe = False
+
+    i = 0
+    while i < len(command):
+        char = command[i]
+        if escaped:
+            raw.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            raw.append(char)
+            escaped = True
+        elif quote:
+            raw.append(char)
+            if char == quote:
+                quote = ""
+            elif quote == '"' and char in ("$", "`"):
+                unsafe = True
+        elif char in ("'", '"'):
+            raw.append(char)
+            quote = char
+        elif char in (";", "\n", "&", "|"):
+            if char == "&" and command[i:i + 2] != "&&":
+                unsafe = True
+            if char in ("&", "|") and command[i:i + 2] == char * 2:
+                i += 1
+            finish()
+        else:
+            raw.append(char)
+            if char in (">", "<", "$", "`", "(", ")"):
+                unsafe = True
+        i += 1
+    if quote or escaped:
+        unsafe = True
+    finish()
+    return result
 
 
 def split_segments(command: str) -> list[list[str]]:
-    """Split on ``;``, ``&&``, ``||`` and ``|``; quotes are respected.
-
-    Returns a list of token lists (one per segment).
-    """
-    try:
-        tokens = shlex.split(command or "")
-    except ValueError:
-        # Unbalanced quotes: treat the whole command as one segment of raw text;
-        # plan mode will block it as non-read-only.
-        return [[command or ""]]
-    segments: list[list[str]] = []
-    current: list[str] = []
-    for token in tokens:
-        if token in _OPERATORS:
-            segments.append(current)
-            current = []
-            continue
-        current.append(token)
-    segments.append(current)
-    return [seg for seg in segments if seg]
+    """Split shell chains, including attached operators, without splitting quoted literals."""
+    return [tokens for tokens, _unsafe in _segments(command or "")]
 
 
 def has_redirect(tokens: list[str]) -> bool:
-    """True when the segment writes anywhere: ``>``, ``>>``, ``2>``... or ``tee``."""
-    program = tokens[0] if tokens else ""
-    if program == "tee":
-        return True
-    for token in tokens:
-        if token in (">", ">>"):
-            return True
-        if token == "&>" or token == "&>>":
-            return True
-    return False
+    """Compatibility helper for unquoted token lists; classify_command retains raw quotes."""
+    return bool(tokens and tokens[0] == "tee") or any(
+        token.startswith((">", "2>", "1>", "&>")) for token in tokens)
+
+
+def _read_only_branch(args: list[str]) -> bool:
+    listing = "--list" in args
+    i = 0
+    while i < len(args):
+        token = args[i]
+        flag = token.split("=", 1)[0]
+        if flag in _BRANCH_READ_FLAGS:
+            i += 1
+        elif flag in _BRANCH_VALUE_FLAGS:
+            i += 1 if "=" in token else 2
+        elif not token.startswith("-") and listing:
+            i += 1
+        else:
+            return False
+    return True
 
 
 def is_read_only_segment(tokens: list[str]) -> bool:
-    """Whether one segment is on the plan-mode read-only allowlist."""
+    """Allow only known read commands and their non-writing forms."""
     if not tokens:
-        return True  # empty segment (e.g. leading operator) - nothing runs
-    if has_redirect(tokens):
-        return False
+        return True
     program = tokens[0]
+    args = tokens[1:]
     if program == "find":
-        return not any(f in tokens for f in _FIND_WRITE_FLAGS)
+        return not any(token in _FIND_WRITE_FLAGS for token in args)
+    if program == "env":
+        return all(token in ("-0", "--null", "--help", "--version") for token in args)
+    if program == "tree" and any(token.startswith("-o") for token in args):
+        return False
+    if program == "rg" and any(token.split("=", 1)[0] in ("--pre", "--hostname-bin") for token in args):
+        return False
     if program == "git":
-        if len(tokens) < 2:
-            return True  # bare "git" prints help
-        sub = tokens[1]
+        if not args:
+            return True
+        sub = args[0]
         if sub not in _GIT_READ_ONLY_SUBS:
             return False
-        if sub == "branch":
-            return not any(f in tokens for f in _GIT_BRANCH_WRITE_FLAGS)
-        return True
+        if any(token.split("=", 1)[0] in ("--output", "--ext-diff", "--textconv") for token in args[1:]):
+            return False
+        return _read_only_branch(args[1:]) if sub == "branch" else True
     return program in _SIMPLE_READ_ONLY
 
 
 def classify_command(command: str) -> tuple[bool, int]:
-    """Classify the whole command line.
-
-    Returns ``(all_read_only, first_non_read_only_segment_index)``. Segments are
-    split on operators with quotes respected; a redirect counts as a write.
-    """
-    for index, tokens in enumerate(split_segments(command)):
-        if not is_read_only_segment(tokens):
+    """(all read-only, first unsafe segment index); never executes the command."""
+    for index, (tokens, unsafe) in enumerate(_segments(command or "")):
+        if unsafe or not is_read_only_segment(tokens):
             return False, index
     return True, -1
