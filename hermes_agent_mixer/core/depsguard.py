@@ -32,6 +32,55 @@ def detect_new_deps(path_name: str, before_text: str | None, after_text: str | N
     return sorted(after - before)
 
 
+def ecosystem(basename: str) -> str:
+    """Package ecosystem of a manifest file name, for rule keys."""
+    name = (basename or "").replace("\\", "/").split("/")[-1].lower()
+    if name == "package.json":
+        return "npm"
+    if name == "cargo.toml":
+        return "cargo"
+    if name == "go.mod":
+        return "go"
+    return "pypi"
+
+
+def compare_names(path_name: str, before_text: str | None, after_text: str | None) -> list[str] | None:
+    """Like detect_new_deps, but None (not []) when either side cannot be parsed."""
+    name = (path_name or "").replace("\\", "/").split("/")[-1].lower()
+    before = _dep_names(name, before_text)
+    after = _dep_names(name, after_text)
+    if before is None or after is None:
+        return None
+    return sorted(after - before)
+
+
+_QUOTED = re.compile(r"""["']([^"'\n]+)["']""")
+_JSON_KEY = re.compile(r'"([^"\n]+)"\s*:\s*"')
+_NOT_DEPS = {"name", "version", "description", "main", "license", "author", "type", "private", "homepage",
+             "module", "types", "repository", "bugs", "keywords", "readme", "requires-python", "edition"}
+
+
+def fragment_names(path_name: str, text: str | None) -> set[str]:
+    """Loose dependency names in a piece of a manifest (used only when the whole file cannot be simulated)."""
+    name = (path_name or "").replace("\\", "/").split("/")[-1].lower()
+    body = text or ""
+    names: set[str] = set()
+    if name == "package.json":
+        names = {k for k in _JSON_KEY.findall(body) if k.lower() not in _NOT_DEPS}
+    elif name == "pyproject.toml":
+        for quoted in _QUOTED.findall(body):
+            match = _PEP508_NAME_RE.match(quoted.strip())
+            if match and " " not in quoted.strip().split(match.group(1), 1)[0]:
+                names.add(match.group(1))
+    elif name.startswith("requirements") and name.endswith(".txt"):
+        names = set(_requirements_names(body) or ())
+    elif name == "cargo.toml":
+        names = {m for m in re.findall(r"^\s*([A-Za-z0-9_-]+)\s*=", body, re.M) if m.lower() not in _NOT_DEPS}
+    elif name == "go.mod":
+        names = {m for m in re.findall(r"^\s*(?:require\s+)?([A-Za-z0-9][^\s/]*/[^\s]+)\s+v", body, re.M)}
+    return {n.lower() if name.startswith("requirements") or name == "pyproject.toml" else n for n in names}
+
+
 def _dep_names(name: str, text: str | None) -> set[str] | None:
     if name == "package.json":
         return _package_json_names(text)

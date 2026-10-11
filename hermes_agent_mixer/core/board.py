@@ -1,153 +1,202 @@
-"""Board rendering for Agent Mixer.
+"""The /mixer grammar and the board, shared by every host.
 
-The board shows the four knobs (active value marked), the current session's
-lines usage. Plain text only.
+A *target* is what a command acts on: a session (changes live in the engine), a parked chat key
+(changes wait for that chat's next turn), the saved settings (``agent-mixer --saved``) or nothing at
+all (refuse and point to ``save``). The grammar is unchanged from 0.1 plus ``save <dial> <value>``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-_USAGE = (
+from hermes_agent_mixer.core import settings
+
+USAGE = (
     "Usage: /mixer [show] | /mixer edits ask|auto|plan | "
     "/mixer scope add|remove|clear|show | /mixer lines N|off | "
-    "/mixer deps allow|ask|block | /mixer save | /mixer reset"
+    "/mixer deps allow|ask|block | /mixer save [<dial> <value>] | /mixer reset"
 )
 
 
-def handle_command(raw_args: str, mixer: Any, session_key: str, *,
-                   save: Any = None) -> str:
-    """Handle one /mixer invocation; returns the reply text."""
+class Refusal(Exception):
+    """The target cannot take this change; the message is the reply."""
+
+
+class Target:
+    """What a command acts on. Subclasses override what they support."""
+
+    name = ""  # shown in notes: "this session only: <name>"
+    allow_session_changes = True
+
+    def effective(self) -> settings.Effective:
+        raise NotImplementedError
+
+    def set(self, knob: str, value: Any) -> str:
+        """Apply one dial change; returns the note appended to the reply."""
+        raise NotImplementedError
+
+    def reset(self) -> str:
+        raise NotImplementedError
+
+    def save_current(self) -> str:
+        raise NotImplementedError
+
+    def save_one(self, knob: str, value: Any) -> str:
+        raise NotImplementedError
+
+    def saved_list(self, knob: str) -> list[str]:
+        """The saved list value for ``scope`` or ``extra_write_tools`` (for ``save <dial> add|remove``)."""
+        return []
+
+
+def handle_command(raw_args: str, target: Target) -> str:
+    """Handle one /mixer invocation and return the reply text."""
     tokens = (raw_args or "").strip().split()
+    if tokens and tokens[0] == "board":
+        tokens = tokens[1:] or ["show"]
     if not tokens or tokens[0] == "show":
-        return render_board(mixer, session_key)
+        return render_board(target.effective(), target.name)
     sub, args = tokens[0], tokens[1:]
-
-    if sub == "edits":
-        return _set_knob(mixer, session_key, "edits", args, ("ask", "auto", "plan"))
-    if sub == "deps":
-        return _set_knob(mixer, session_key, "deps", args, ("allow", "ask", "block"))
-    if sub == "lines":
-        return _set_lines(mixer, session_key, args)
-    if sub == "scope":
-        return _scope_command(mixer, session_key, args)
-    if sub == "save":
-        return _save(mixer, session_key, save)
-    if sub == "reset":
-        return _reset(mixer, session_key)
-    return f"Unknown subcommand {_qc(sub)}. {_USAGE}"
-
-
-def _qc(value: str) -> str:
-    return f"'{value}'"
+    try:
+        if sub == "edits":
+            return _set_choice(target, "edits", args, settings.EDIT_MODES)
+        if sub == "deps":
+            return _set_choice(target, "deps", args, settings.DEPS_MODES)
+        if sub == "lines":
+            return _set_lines(target, args)
+        if sub == "scope":
+            return _scope_command(target, args)
+        if sub == "save":
+            return _save(target, args)
+        if sub == "reset":
+            return target.reset()
+    except Refusal as refusal:
+        return str(refusal)
+    return f"Unknown subcommand '{sub}'. {USAGE}"
 
 
-def _set_knob(mixer: Any, session_key: str, knob: str, args: list[str],
-              allowed: tuple[str, ...]) -> str:
+def _set_choice(target: Target, knob: str, args: list[str], allowed: tuple[str, ...]) -> str:
     if len(args) != 1:
-        return f"{knob} needs one of: {', '.join(allowed)}. {_USAGE}"
+        return f"{knob} needs one of: {', '.join(allowed)}. {USAGE}"
     value = args[0].lower()
     if value not in allowed:
-        return f"Unknown {knob} mode {_qc(args[0])}. Choose one of: {', '.join(allowed)}."
-    mixer.set_session(session_key, knob, value)
-    return f"mixer: {knob} = {value}" + _session_note(session_key)
+        return f"Unknown {knob} mode '{args[0]}'. Choose one of: {', '.join(allowed)}."
+    return f"mixer: {knob} = {value}" + target.set(knob, value)
 
 
-def _set_lines(mixer: Any, session_key: str, args: list[str]) -> str:
-    if len(args) != 1:
-        return f"lines needs a positive number of lines or 'off'. {_USAGE}"
-    raw = args[0].lower()
-    if raw == "off":
-        mixer.set_session(session_key, "lines", "off")
-        return f"mixer: lines = off" + _session_note(session_key)
+def _parse_lines_arg(raw: str) -> tuple[int | None, str]:
+    text = raw.lower()
+    if text == "off":
+        return 0, ""
     try:
-        number = int(raw)
+        number = int(text)
     except ValueError:
-        return f"Unknown lines value {_qc(args[0])}. Use a positive number of lines or 'off'."
-    if number <= 0:
-        return f"lines must be a positive number or 'off' (got {number})."
-    mixer.set_session(session_key, "lines", number)
-    return f"mixer: lines = {number} per turn" + _session_note(session_key)
+        return None, f"Unknown lines value '{raw}'. Use a positive number of lines, or off (0)."
+    if number < 0:
+        return None, f"lines must be a positive number, or off (0) (got {number})."
+    return number, ""
 
 
-def _scope_command(mixer: Any, session_key: str, args: list[str]) -> str:
+def _set_lines(target: Target, args: list[str]) -> str:
+    if len(args) != 1:
+        return f"lines needs a positive number of lines, or off. {USAGE}"
+    number, error = _parse_lines_arg(args[0])
+    if number is None:
+        return error
+    shown = "off" if number == 0 else f"{number} per turn"
+    return f"mixer: lines = {shown}" + target.set("lines", number)
+
+
+def _scope_command(target: Target, args: list[str]) -> str:
     if not args:
-        return render_scope_lines(mixer, session_key) + f"\n{('Usage: /mixer scope add|remove|clear|show')}"
+        return _scope_lines(target.effective()) + "\nUsage: /mixer scope add|remove|clear|show"
     verb = args[0]
-    current = list(mixer.settings_for(session_key)["scope"])
+    current = list(target.effective()["scope"])
     if verb == "add" and len(args) == 2:
-        glob = args[1]
-        if glob not in current:
-            current.append(glob)
-        mixer.set_session(session_key, "scope", current)
-        return f"mixer: scope = {_fmt_scope(current)}" + _session_note(session_key)
+        if args[1] not in current:
+            current.append(args[1])
+        return f"mixer: scope = {_fmt_scope(current)}" + target.set("scope", current)
     if verb == "remove" and len(args) == 2:
         current = [g for g in current if g != args[1]]
-        mixer.set_session(session_key, "scope", current)
-        return f"mixer: scope = {_fmt_scope(current)}" + _session_note(session_key)
+        return f"mixer: scope = {_fmt_scope(current)}" + target.set("scope", current)
     if verb == "clear" and len(args) == 1:
-        mixer.set_session(session_key, "scope", [])
-        return "mixer: scope cleared (project root only)" + _session_note(session_key)
+        return "mixer: scope cleared (no limit)" + target.set("scope", [])
     if verb == "show" and len(args) == 1:
-        return render_scope_lines(mixer, session_key)
-    return f"scope needs add|remove|clear|show. {_USAGE}"
+        return _scope_lines(target.effective())
+    return f"scope needs add|remove|clear|show. {USAGE}"
+
+
+def _save(target: Target, args: list[str]) -> str:
+    if not args:
+        return target.save_current()
+    knob, rest = args[0], args[1:]
+    if knob not in settings.SAVED_KEYS:
+        return f"Unknown setting '{knob}'. Dials: {', '.join(settings.DIALS)} (and extra_write_tools)."
+    if knob == "scope" or knob == "extra_write_tools":
+        if rest and rest[0] in ("add", "remove", "clear"):
+            return _save_list_edit(target, knob, rest)
+        return target.save_one(knob, list(rest))
+    if len(rest) != 1:
+        return f"save {knob} needs exactly one value. {USAGE}"
+    if knob == "lines":
+        number, error = _parse_lines_arg(rest[0])
+        if number is None:
+            return error
+        return target.save_one("lines", number)
+    allowed = settings.EDIT_MODES if knob == "edits" else settings.DEPS_MODES
+    value = rest[0].lower()
+    if value not in allowed:
+        return f"Unknown {knob} mode '{rest[0]}'. Choose one of: {', '.join(allowed)}."
+    return target.save_one(knob, value)
+
+
+def _save_list_edit(target: Target, knob: str, rest: list[str]) -> str:
+    current = list(target.saved_list(knob))
+    verb, globs = rest[0], rest[1:]
+    if verb == "add":
+        current += [g for g in globs if g not in current]
+    elif verb == "remove":
+        current = [g for g in current if g not in globs]
+    else:
+        current = []
+    return target.save_one(knob, current)
 
 
 def _fmt_scope(globs: list[str]) -> str:
-    return ", ".join(globs) if globs else "(project root)"
+    return ", ".join(globs) if globs else "(no limit)"
 
 
-def _save(mixer: Any, session_key: str, save: Any) -> str:
-    if not callable(save):
-        return "mixer: save is not available here (config writer missing)."
-    effective = mixer.settings_for(session_key)
-    for knob in ("edits", "scope", "lines", "deps"):
-        # The host schema accepts one scalar type. Persist both N and off as
-        # text; settings.normalise converts numeric text back into a budget.
-        value = str(effective[knob]) if knob == "lines" else effective[knob]
-        save(knob, value)
-    return "mixer: saved these as the plugin defaults (all new sessions start here)."
+def _scope_lines(eff: settings.Effective) -> str:
+    return f"  scope   {_fmt_scope(eff['scope'])}  ({eff.sources['scope']})"
 
 
-def _reset(mixer: Any, session_key: str) -> str:
-    mixer.reset_session(session_key)
-    return "mixer: reset to the saved defaults for this session."
-
-
-def _session_note(session_key: str) -> str:
-    return "" if not session_key else f" (this session only: {session_key[:8]})"
-
-
-def render_scope_lines(mixer: Any, session_key: str) -> str:
-    globs = mixer.settings_for(session_key)["scope"]
-    note = "" if globs else "  (everything inside the project root is allowed)"
-    return f"  scope   {_fmt_scope(globs)}{note}"
-
-
-def render_board(mixer: Any, session_key: str) -> str:
-    """One screenshot-style board."""
-    settings = mixer.settings_for(session_key)
+def render_board(eff: settings.Effective, label: str = "") -> str:
+    """One screenshot-style board; each value says where it comes from."""
+    where = label or eff.session or "no session"
     lines = [
-        f"Agent Mixer · session {(session_key or 'global')[:12] or 'global'}",
-        _knob_line("edits ", ("ask", "auto", "plan"), settings["edits"]),
-        render_scope_lines(mixer, session_key),
-        f"  lines   {_lines_cell(mixer, session_key, settings['lines'])}",
-        _knob_line("deps  ", ("allow", "ask", "block"), settings["deps"]),
-        "  ask uses Hermes' own approvals gate: /yolo or approvals.mode off skips it, and not a Mixer knob.",
+        f"Agent Mixer · {where}",
+        _choice_line("edits ", settings.EDIT_MODES, eff["edits"], eff.sources["edits"]),
+        _scope_lines(eff) if eff["scope"] else f"  scope   (no limit)  ({eff.sources['scope']})",
+        f"  lines   {_lines_cell(eff)}  ({eff.sources['lines']})",
+        _choice_line("deps  ", settings.DEPS_MODES, eff["deps"], eff.sources["deps"]),
     ]
+    if eff["extra_write_tools"]:
+        lines.append(f"  extra write tools  {', '.join(eff['extra_write_tools'])}  ({eff.sources['extra_write_tools']})")
+    for warning in eff.warnings:
+        lines.append(f"  ! {warning}; fix it with /mixer save <dial> <value> or the plugin settings")
+    lines.append("  ask uses the host's approvals gate; always-allow remembers one file or one package. "
+                 "Terminal and execute_code are watched best-effort, not sandboxed.")
     return "\n".join(lines)
 
 
-def _knob_line(label: str, values: tuple[str, ...], active: str) -> str:
-    parts = []
-    for value in values:
-        rendered = f"[ACTIVE] {value}" if value == active else value
-        parts.append(rendered)
-    return f"  {label}{'  '.join(parts)}"
+def _choice_line(label: str, values: tuple[str, ...], active: str, source: str) -> str:
+    parts = [f"[ACTIVE] {value}" if value == active else value for value in values]
+    return f"  {label}{'  '.join(parts)}  ({source})"
 
 
-def _lines_cell(mixer: Any, session_key: str, budget: Any) -> str:
-    if not isinstance(budget, int):
+def _lines_cell(eff: settings.Effective) -> str:
+    budget = eff["lines"]
+    if not budget:
         return "off"
-    used = mixer.lines_state.session_used(session_key)
-    return f"{used} / {budget} this turn"
+    left = eff.left if eff.left is not None else budget
+    return f"{budget} per turn, {left} left this turn"

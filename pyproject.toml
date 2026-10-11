@@ -1,18 +1,21 @@
 [project]
 name = "hermes-agent-mixer"
-version = "0.1.0"
-description = "A mixing desk for how much a Hermes agent may change: edits, scope, lines and deps knobs"
+version = "0.2.0"
+description = "A mixing desk for how much a coding agent may change: Hermes plugin plus Claude Code, Codex and Gemini CLI hooks"
 authors = [{ name = "Sahil Saghir" }]
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+agent-mixer = "hermes_agent_mixer.cli:main"
+
 [project.entry-points."hermes_agent.plugins"]
 hermes-agent-mixer = "hermes_agent_mixer"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

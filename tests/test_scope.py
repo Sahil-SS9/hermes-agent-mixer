@@ -1,140 +1,94 @@
-"""Tests for the scope knob: glob matching, containment, symlinks, absolute globs, Windows paths."""
+"""The scope dial: glob matching, symlinks and absolute globs (0.2 semantics: an empty scope means no
+limit, relative globs anchor at the workspace root; see test_paths.py for roots and Windows)."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from hermes_agent_mixer.core import scope
+from tests.helpers import action, run, write
 
 
-def test_relative_path_inside_scope_glob(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert scope.check_scope("src/a.py", ["src/**"], root=tmp_path) is None
+def _allowed(path, globs, root):
+    return action(run(write(path), root=root, scope=globs)) == "allow"
 
 
-def test_path_outside_scope_names_the_allowed_globs(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("nope/x.txt", ["src/**", "tests/**"], root=tmp_path)
-    assert message is not None
-    assert "src/**" in message
-    assert "tests/**" in message
+def test_relative_path_inside_scope_glob(tmp_path):
+    assert _allowed("src/a.py", ["src/**"], tmp_path)
 
 
-def test_empty_scope_allows_everything_inside_root(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert scope.check_scope("anywhere/file.txt", [], root=tmp_path) is None
+def test_path_outside_scope_names_the_allowed_globs(tmp_path):
+    message = run(write("nope/x.txt"), root=tmp_path, scope=["src/**", "tests/**"]).message
+    assert "src/**" in message and "tests/**" in message and "mixer:scope" in message
 
 
-def test_write_outside_project_root_blocked(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("../escape.txt", [], root=tmp_path)
-    assert message is not None
-    assert "project" in message.lower()
+def test_empty_scope_allows_everything_even_outside_the_workspace(tmp_path):
+    assert _allowed("anywhere/file.txt", [], tmp_path)
+    assert _allowed("../escape.txt", [], tmp_path)
 
 
-def test_absolute_glob_allows_outside_root(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
+def test_a_path_outside_the_workspace_needs_an_absolute_glob(tmp_path, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside")
-    assert scope.check_scope(f"{outside}/x.txt", [f"{outside}/**"], root=tmp_path) is None
+    assert not _allowed(f"{outside}/x.txt", ["src/**"], tmp_path)
+    assert _allowed(f"{outside}/x.txt", [f"{outside}/**"], tmp_path)
 
 
-def test_outside_root_needs_an_absolute_glob(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
-    outside = tmp_path_factory.mktemp("outside")
-    message = scope.check_scope(f"{outside}/x.txt", ["src/**"], root=tmp_path)
-    assert message is not None
+def test_dotdot_cannot_climb_out_of_a_relative_glob(tmp_path):
+    (tmp_path / "src").mkdir()
+    assert not _allowed("src/../README.md", ["src/**"], tmp_path)
 
 
-def test_symlink_escape_blocked(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
+def test_symlink_escape_blocked(tmp_path, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside")
     (tmp_path / "link-dir").symlink_to(outside, target_is_directory=True)
-    message = scope.check_scope("link-dir/x.txt", ["link-dir/**"], root=tmp_path)
-    assert message is not None, "symlink resolving outside the project root must be blocked"
-    assert "scope" in message.lower() or "root" in message.lower()
+    assert not _allowed("link-dir/x.txt", ["link-dir/**"], tmp_path)
 
 
-def test_symlink_to_inside_scope_allowed(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "target").mkdir()
+def test_symlink_to_inside_scope_allowed(tmp_path):
+    (tmp_path / "src" / "target").mkdir(parents=True)
     (tmp_path / "alias").symlink_to(tmp_path / "src" / "target", target_is_directory=True)
-    assert scope.check_scope("alias/file.txt", ["src/**"], root=tmp_path) is None
+    assert _allowed("alias/file.txt", ["src/**"], tmp_path)
 
 
-def test_windows_drive_letter_rejected_cleanly(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("C:\\Users\\x\\file.txt", [], root=tmp_path)
-    assert message is not None
-    assert "windows" in message.lower()
+def test_dot_slash_prefix_resolves_and_matches(tmp_path):
+    assert _allowed("./src/a.py", ["src/**"], tmp_path)
+    assert _allowed("src/a.py", ["./src/**"], tmp_path)
 
 
-def test_windows_backslash_path_rejected_cleanly(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("dir\\file.txt", [], root=tmp_path)
-    assert message is not None
-    assert "windows" in message.lower()
+def test_star_star_matches_everything_below(tmp_path):
+    assert _allowed("a/b.py", ["**"], tmp_path)
 
 
-def test_scope_glob_with_backslashes_is_normalised(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert scope.check_scope("src/a.py", ["src\\**"], root=tmp_path) is None
+def test_nested_glob_does_not_cross_siblings(tmp_path):
+    assert not _allowed("srcx/a.py", ["src/**"], tmp_path)
 
 
-def test_dot_slash_prefix_resolves_and_matches(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert scope.check_scope("./src/a.py", ["src/**"], root=tmp_path) is None
-
-
-def test_missing_scope_components_reported(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("a/b.py", ["**"], root=tmp_path)
-    assert message is None
-
-
-def test_scope_message_names_the_knob(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("x/y.txt", ["src/**"], root=tmp_path)
-    assert message is not None
-    assert "scope" in message.lower()
-
-
-def test_patch_tool_path_checked(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
-    outside = tmp_path_factory.mktemp("outside")
-    message = scope.check_scope(str(Path(outside) / "a.py"), [], root=tmp_path)
-    assert message is not None
-
-
-def test_nested_glob_does_not_cross_siblings(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    message = scope.check_scope("srcx/a.py", ["src/**"], root=tmp_path)
-    assert message is not None, "src/** must not match srcx/"
-
-
-def test_absolute_glob_in_nested_form(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
+def test_absolute_glob_in_nested_form(tmp_path, tmp_path_factory):
     nested = tmp_path_factory.mktemp("nested") / "proj" / "docs"
     nested.mkdir(parents=True)
-    assert scope.check_scope(str(nested / "d.md"), ["/nonexistent/**"], root=tmp_path) is not None
-    assert scope.check_scope(str(nested / "d.md"), [f"{nested.parent}/**"], root=tmp_path) is None
+    assert not _allowed(str(nested / "d.md"), ["/nonexistent/**"], tmp_path)
+    assert _allowed(str(nested / "d.md"), [f"{nested.parent}/**"], tmp_path)
 
 
-def test_resolved_symlink_target_used_for_glob(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
+def test_a_symlinked_glob_path_is_judged_by_its_real_location(tmp_path, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside")
     (outside / "real").mkdir()
     (tmp_path / "jump").symlink_to(outside / "real")
-    # Even though the glob names the link path, resolution lands outside root:
-    # only an absolute glob naming the REAL path can allow it.
-    message = scope.check_scope("jump/a.txt", ["jump/**"], root=tmp_path)
-    assert message is not None
+    assert not _allowed("jump/a.txt", ["jump/**"], tmp_path)
+    assert _allowed("jump/a.txt", [f"{(outside / 'real').resolve()}/**"], tmp_path)
 
 
-def test_absolute_glob_allows_resolved_symlink_target(tmp_path, monkeypatch, tmp_path_factory):
-    monkeypatch.chdir(tmp_path)
-    outside = tmp_path_factory.mktemp("outside")
-    (outside / "real").mkdir()
-    (tmp_path / "jump").symlink_to(outside / "real")
-    assert scope.check_scope("jump/a.txt", [f"{(outside / 'real').resolve()}/**"], root=tmp_path) is None
+def test_glob_regex_units():
+    assert scope.allowed("/p/src/a/b.py", ["src/**"], "/p")
+    assert not scope.allowed("/p/src.py", ["src/**"], "/p")
+    assert scope.allowed("/p/x.md", ["*.md"], "/p")
+    assert not scope.allowed("/p/d/x.md", ["*.md"], "/p")
+    assert scope.allowed("/p/d/x.md", ["**/*.md"], "/p")
+    assert scope.allowed("/p/x.md", ["**/*.md"], "/p")
+    assert scope.allowed("/p/ab.py", ["a?.py"], "/p")
+    assert not scope.allowed("/p/a/.py", ["a?.py"], "/p")
+
+
+def test_root_with_regex_characters_is_matched_literally():
+    assert scope.allowed("/w/proj[1]+x/src/a.py", ["src/**"], "/w/proj[1]+x")
+    assert not scope.allowed("/w/projj/src/a.py", ["src/**"], "/w/proj[1]+x")

@@ -1,26 +1,41 @@
 name: hermes-agent-mixer
-version: 0.1.0
-description: A mixing desk for how much a Hermes agent may change - edits, scope, lines and deps knobs enforced in pre_tool_call
+version: 0.2.0
+manifest_version: 2
+description: A mixing desk for how much a coding agent may change - edits, scope, lines and deps dials enforced in pre_tool_call, plus agent-mixer hooks for Claude Code, Codex and Gemini CLI
 author: Sahil Saghir
 license: MIT
+tags: [safety, guardrails, approvals, policy]
 provides_hooks:
   - pre_tool_call
   - pre_llm_call
+  - subagent_start
+  - subagent_stop
 provides_tools: []
 config_schema:
   edits:
     type: str
+    label: Edit permission
+    choices: [ask, auto, plan]
     default: auto
-    description: "edit permission mode: ask, auto or plan"
+    description: "ask: every file change waits for your approval. auto: changes go ahead. plan: read-only, writes and non-read-only commands are blocked."
   scope:
     type: list
+    label: Writable scope
     default: []
-    description: "allow-list of glob patterns for file writes inside the project root"
+    description: "Glob allow-list for file writes. Empty means no limit. Relative globs anchor at the workspace root; absolute globs (/..., ~/...) match anywhere."
   lines:
-    type: str
-    default: "off"
-    description: "max lines changed per turn across write_file/patch, or 'off'"
+    type: int
+    label: Line budget per turn
+    default: 0
+    description: "Most lines (added plus removed) one turn may change across write_file and patch, shared with subagents. 0 turns the budget off."
   deps:
     type: str
+    label: New dependencies
+    choices: [allow, ask, block]
     default: ask
-    description: "new-dependency behaviour: allow, ask or block"
+    description: "What happens when a change adds a new package: allow it, ask first, or block it."
+  extra_write_tools:
+    type: list
+    label: Extra write tools
+    default: []
+    description: "Glob tool names (for example mcp__fs__write*) treated like write_file. They use their path, file_path, filename or target argument."

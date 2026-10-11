@@ -39,7 +39,7 @@ def _hooked_ctx(settings: dict | None = None) -> conftest_mod.FakeCtx:
 class TestRegisterWiring:
     def test_register_wires_pre_tool_call_and_pre_llm_call_hooks(self, fake_ctx):
         mixer_plugin.register(fake_ctx)
-        assert set(fake_ctx.hooks) == {"pre_tool_call", "pre_llm_call"}
+        assert set(fake_ctx.hooks) == {"pre_tool_call", "pre_llm_call", "subagent_start", "subagent_stop"}
         assert len(fake_ctx.hooks["pre_tool_call"]) == 1
         assert len(fake_ctx.hooks["pre_llm_call"]) == 1
         assert callable(fake_ctx.hooks["pre_tool_call"][0])
@@ -56,12 +56,12 @@ class TestRegisterWiring:
         mixer_plugin.register(fake_ctx)
         assert fake_ctx.unload_callbacks
 
-    def test_on_unload_resets_wired_state(self, fake_ctx, monkeypatch):
+    def test_on_unload_resets_state(self, fake_ctx, monkeypatch):
         mixer_plugin.register(fake_ctx)
-        mixer_plugin._HOOKS_WIRED.append("pre_tool_call")
+        mixer_plugin.get_mixer().set_session("s", "edits", "plan")
         for cb in fake_ctx.unload_callbacks:
             cb()
-        assert mixer_plugin._HOOKS_WIRED == []
+        assert mixer_plugin._MIXER is None and mixer_plugin._CONFIG_GET is None
 
     def test_pre_tool_call_permissive_in_scaffold(self, fake_ctx, monkeypatch):
         mixer_plugin.register(fake_ctx)
@@ -130,7 +130,7 @@ class TestHookWiring:
         mixer = mixer_plugin.get_mixer()
         mixer.set_session("sess-a", "edits", "plan")
         mixer.reset_session("sess-a")
-        assert mixer.settings_for("sess-a")["edits"] == "auto"
+        assert mixer.effective("sess-a")["edits"] == "auto"
 
     def test_hook_accepts_full_host_payload(self, tmp_path, monkeypatch):
         """The hook must tolerate every kwarg the host sends pre_tool_call."""

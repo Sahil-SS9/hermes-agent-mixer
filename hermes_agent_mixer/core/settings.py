@@ -1,82 +1,139 @@
-"""Knob settings: validation and normalisation.
+"""Dial definitions, validation and the effective-settings view.
 
-Raw values arrive from plugin config (possibly anything YAML gave) and from
-/mixer commands (strings). Everything is normalised here; invalid values fall
-back to defaults instead of breaking enforcement.
-
-The manifest declares saved lines as text: "off" or a numeric string.
-Runtime normalisation converts numeric text to a positive integer budget.
+Raw values arrive from saved settings (plugin config or settings.json, so possibly anything YAML or
+JSON gave) and from commands (strings). A saved value that is not valid never weakens a dial:
+``edits`` and ``deps`` fall back to ``ask``, and the board shows a warning (D6). ``lines`` is an
+int with ``0`` meaning off; the 0.1 text forms ``"off"`` and ``"50"`` are still read.
 """
 
 from __future__ import annotations
 
-_KNOB_KEYS = ("edits", "scope", "lines", "deps")
-_EDIT_MODES = ("ask", "auto", "plan")
-_DEPS_MODES = ("allow", "ask", "block")
+import logging
+from dataclasses import dataclass, field
+from typing import Any
 
-DEFAULT_EDITS = "auto"
-DEFAULT_SCOPE: list[str] = []
-LINES_OFF = "off"
-DEFAULT_DEPS = "ask"
+log = logging.getLogger("agent_mixer")
 
+DIALS = ("edits", "scope", "lines", "deps")
+SAVED_ONLY = ("extra_write_tools",)
+SAVED_KEYS = (*DIALS, *SAVED_ONLY)
+EDIT_MODES = ("ask", "auto", "plan")
+DEPS_MODES = ("allow", "ask", "block")
 
-def normalise(raw: dict) -> dict:
-    """Return validated knobs ``{edits, scope, lines, deps}``.
+DEFAULTS: dict[str, Any] = {
+    "edits": "auto",
+    "scope": [],
+    "lines": 0,
+    "deps": "ask",
+    "extra_write_tools": [],
+}
+# What an invalid saved value falls back to. Never the most permissive choice.
+SAFE_FALLBACK: dict[str, Any] = {"edits": "ask", "deps": "ask", "scope": [], "lines": 0, "extra_write_tools": []}
 
-    ``lines`` is always the string "off" or a positive int, so saved defaults
-    and session overrides agree regardless of the source text.
-    """
-    edits = _edit_mode(raw.get("edits"))
-    scope = _scope(raw.get("scope"))
-    lines = _lines(raw.get("lines"))
-    deps = _deps_mode(raw.get("deps"))
-    return {"edits": edits, "scope": scope, "lines": lines, "deps": deps}
-
-
-def defaults() -> dict:
-    return normalise({})
-
-
-def _edit_mode(value) -> str:
-    if isinstance(value, str) and value.lower() in _EDIT_MODES:
-        return value.lower()
-    return DEFAULT_EDITS
-
-
-def _deps_mode(value) -> str:
-    if isinstance(value, str) and value.lower() in _DEPS_MODES:
-        return value.lower()
-    return DEFAULT_DEPS
-
-
-def _scope(value) -> list[str]:
-    if not isinstance(value, (list, tuple)):
-        if isinstance(value, str) and value.strip():
-            return [value.strip()]
-        return list(DEFAULT_SCOPE)
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
-def _lines(value):
-    if value is None:
-        return LINES_OFF
-    if isinstance(value, bool):
-        return LINES_OFF
-    if isinstance(value, int):
-        return value if value > 0 else LINES_OFF
-    if isinstance(value, float) and value.is_integer():
-        return int(value) if value > 0 else LINES_OFF
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in ("", "off", "on"):
-            return LINES_OFF
-        try:
-            number = int(text)
-        except ValueError:
-            return LINES_OFF
-        return number if number > 0 else LINES_OFF
-    return LINES_OFF
+_warned: set[tuple[str, str]] = set()
 
 
 def is_valid_knob(knob: str) -> bool:
-    return knob in _KNOB_KEYS
+    return knob in DIALS
+
+
+def default_of(knob: str):
+    value = DEFAULTS[knob]
+    return list(value) if isinstance(value, list) else value
+
+
+def parse_lines(value: Any) -> int | None:
+    """Return a non-negative int budget (0 = off), or None when the value is not a budget."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() and value >= 0 else None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("off", "none", ""):
+            return 0
+        try:
+            number = int(text)
+        except ValueError:
+            return None
+        return number if number >= 0 else None
+    return None
+
+
+def _scope_list(value: Any) -> list[str] | None:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return None
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def coerce(knob: str, raw: Any) -> tuple[Any, bool]:
+    """Validate one raw value. Returns ``(value, ok)``; when not ok the value is the safe fallback."""
+    if knob == "edits":
+        if isinstance(raw, str) and raw.strip().lower() in EDIT_MODES:
+            return raw.strip().lower(), True
+    elif knob == "deps":
+        if isinstance(raw, str) and raw.strip().lower() in DEPS_MODES:
+            return raw.strip().lower(), True
+    elif knob == "lines":
+        number = parse_lines(raw)
+        if number is not None:
+            return number, True
+    elif knob in ("scope", "extra_write_tools"):
+        items = _scope_list(raw)
+        if items is not None:
+            return items, True
+    fallback = SAFE_FALLBACK[knob]
+    return (list(fallback) if isinstance(fallback, list) else fallback), False
+
+
+@dataclass
+class Effective:
+    """The dials in force for one session, where each came from, and what is wrong with them."""
+
+    values: dict[str, Any]
+    sources: dict[str, str]
+    warnings: list[str] = field(default_factory=list)
+    session: str = ""
+    left: int | None = None  # lines left this turn, when a budget is on
+
+    def __getitem__(self, knob: str):
+        return self.values[knob]
+
+    def get(self, knob: str, default=None):
+        return self.values.get(knob, default)
+
+    def is_default(self) -> bool:
+        return all(self.values[k] == DEFAULTS[k] for k in DIALS)
+
+
+def resolve(saved: dict[str, Any], override: dict[str, Any] | None = None, *, session: str = "") -> Effective:
+    """Session override over saved value over default, with a source label per dial."""
+    override = override or {}
+    values: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    warnings: list[str] = []
+    for knob in SAVED_KEYS:
+        if knob in override and knob in DIALS:
+            value, _ok = coerce(knob, override[knob])
+            values[knob], sources[knob] = value, "session"
+            continue
+        raw = saved.get(knob)
+        if raw is None:
+            values[knob], sources[knob] = default_of(knob), "default"
+            continue
+        value, ok = coerce(knob, raw)
+        values[knob] = value
+        if not ok:
+            sources[knob] = "saved"
+            message = f"saved {knob} {raw!r} is not valid; using {SAFE_FALLBACK[knob]!r}"
+            warnings.append(message)
+            if (knob, repr(raw)) not in _warned:
+                _warned.add((knob, repr(raw)))
+                log.warning("agent-mixer: %s", message)
+        else:
+            sources[knob] = "default" if value == DEFAULTS[knob] else "saved"
+    return Effective(values, sources, warnings, session)

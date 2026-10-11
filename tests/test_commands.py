@@ -1,23 +1,25 @@
-"""Tests for the /mixer board, subcommands, save and reset."""
+"""The /mixer board, subcommands, save and reset (host-neutral grammar)."""
 
 from __future__ import annotations
 
-import pytest
-
-from hermes_agent_mixer.core import board, mixer as mixer_mod
-from hermes_agent_mixer.hermes import host as session_key_mod
+from hermes_agent_mixer.core import board
+from hermes_agent_mixer.core.mixer import Mixer
+from hermes_agent_mixer.core.targets import SessionTarget
 
 
 def _mixer(settings=None):
     store = dict(settings or {})
+    mixer = Mixer(saved=lambda: dict(store))
+    return mixer, store
 
-    def config_get(key, default=None):
-        return store.get(key, default)
 
-    def config_set(key, value):
-        store[key] = value
+def _cmd(mixer, raw, sid="sess-a", store=None):
+    target = SessionTarget(mixer, sid, write_saved=None if store is None else store.__setitem__)
+    return board.handle_command(raw, target)
 
-    return mixer_mod.Mixer(config_get=config_get), config_set
+
+def _eff(mixer, sid="sess-a"):
+    return mixer.effective(sid)
 
 
 # -- subcommand behaviour -----------------------------------------------------
@@ -25,242 +27,179 @@ def _mixer(settings=None):
 
 def test_show_renders_board_with_knob_values():
     mixer, _ = _mixer({"scope": ["src/**", "tests/**"]})
-    text = board.handle_command("", mixer, "sess-abc")
+    text = _cmd(mixer, "", "sess-abc")
     assert "Agent Mixer" in text
     assert "edits" in text and "auto" in text and "[ACTIVE]" in text
     assert "src/**" in text and "tests/**" in text
     assert "deps" in text and "ask" in text
-    assert "approvals" in text  # the Hermes approvals rule is stated in words
+    assert "approvals" in text  # the approvals rule is stated in words
 
 
 def test_show_shows_lines_off_or_budget():
     mixer, _ = _mixer({"lines": 200})
-    text = board.handle_command("", mixer, "s")
+    text = _cmd(mixer, "", "s")
     assert "200" in text and "this turn" in text
     mixer2, _ = _mixer({"lines": "off"})
-    text2 = board.handle_command("", mixer2, "s")
-    assert "off" in text2.lower()
+    assert "off" in _cmd(mixer2, "", "s").lower()
+
+
+def test_board_alias_shows_the_board():
+    mixer, _ = _mixer()
+    assert _cmd(mixer, "board") == _cmd(mixer, "")
 
 
 def test_edits_subcommand_sets_override():
     mixer, _ = _mixer()
-    text = board.handle_command("edits plan", mixer, "sess-a")
-    assert "plan" in text
-    assert mixer.settings_for("sess-a")["edits"] == "plan"
+    assert "plan" in _cmd(mixer, "edits plan")
+    assert _eff(mixer)["edits"] == "plan"
 
 
 def test_edits_rejects_unknown_mode():
     mixer, _ = _mixer()
-    text = board.handle_command("edits yolo", mixer, "sess-a")
+    text = _cmd(mixer, "edits yolo")
     assert "unknown" in text.lower() or "invalid" in text.lower()
-    assert mixer.settings_for("sess-a")["edits"] == "auto"
+    assert _eff(mixer)["edits"] == "auto"
 
 
 def test_scope_add_remove_clear_show():
     mixer, _ = _mixer()
-    board.handle_command("scope add src/**", mixer, "sess-a")
-    board.handle_command("scope add tests/**", mixer, "sess-a")
-    shown = board.handle_command("scope show", mixer, "sess-a")
+    _cmd(mixer, "scope add src/**")
+    _cmd(mixer, "scope add tests/**")
+    shown = _cmd(mixer, "scope show")
     assert "src/**" in shown and "tests/**" in shown
-    board.handle_command("scope remove src/**", mixer, "sess-a")
-    assert mixer.settings_for("sess-a")["scope"] == ["tests/**"]
-    board.handle_command("scope clear", mixer, "sess-a")
-    assert mixer.settings_for("sess-a")["scope"] == []
+    _cmd(mixer, "scope remove src/**")
+    assert _eff(mixer)["scope"] == ["tests/**"]
+    _cmd(mixer, "scope clear")
+    assert _eff(mixer)["scope"] == []
 
 
 def test_lines_sets_positive_int():
     mixer, _ = _mixer()
-    board.handle_command("lines 150", mixer, "sess-a")
-    assert mixer.settings_for("sess-a")["lines"] == 150
+    _cmd(mixer, "lines 150")
+    assert _eff(mixer)["lines"] == 150
 
 
-def test_lines_rejects_zero_and_garbage():
+def test_lines_zero_means_off_and_garbage_is_rejected():
+    mixer, _ = _mixer({"lines": 40})
+    assert "off" in _cmd(mixer, "lines 0")
+    assert _eff(mixer)["lines"] == 0
     mixer, _ = _mixer()
-    zero = board.handle_command("lines 0", mixer, "sess-a")
-    assert "off" in zero.lower() or "positive" in zero.lower()
-    garbage = board.handle_command("lines many", mixer, "sess-a")
-    assert "unknown" in garbage.lower() or "off" in garbage.lower()
-    assert mixer.settings_for("sess-a")["lines"] == "off"
+    garbage = _cmd(mixer, "lines many")
+    assert "unknown" in garbage.lower()
+    negative = _cmd(mixer, "lines -3")
+    assert "positive" in negative.lower()
+    assert _eff(mixer)["lines"] == 0
 
 
 def test_lines_off_disables():
     mixer, _ = _mixer({"lines": 150})
-    board.handle_command("lines off", mixer, "sess-a")
-    assert mixer.settings_for("sess-a")["lines"] == "off"
+    _cmd(mixer, "lines off")
+    assert _eff(mixer)["lines"] == 0
 
 
 def test_deps_subcommand_modes():
     mixer, _ = _mixer()
-    board.handle_command("deps block", mixer, "sess-a")
-    assert mixer.settings_for("sess-a")["deps"] == "block"
-    bad = board.handle_command("deps maybe", mixer, "sess-a")
+    _cmd(mixer, "deps block")
+    assert _eff(mixer)["deps"] == "block"
+    bad = _cmd(mixer, "deps maybe")
     assert "unknown" in bad.lower() or "invalid" in bad.lower()
 
 
 def test_unknown_subcommand_prints_usage():
     mixer, _ = _mixer()
-    text = board.handle_command("destroy everything", mixer, "sess-a")
-    assert "usage" in text.lower()
+    assert "usage" in _cmd(mixer, "destroy everything").lower()
 
 
 def test_state_never_mutated_by_bad_input():
     mixer, _ = _mixer()
-    board.handle_command("edits nope", mixer, "s")
-    board.handle_command("deps nope", mixer, "s")
-    board.handle_command("lines x", mixer, "s")
-    assert mixer.settings_for("s") == {"edits": "auto", "scope": [], "lines": "off", "deps": "ask"}
+    for raw in ("edits nope", "deps nope", "lines x", "scope fly", "save lines x", "save edits plna"):
+        _cmd(mixer, raw, "s")
+    eff = _eff(mixer, "s")
+    assert eff.values == {"edits": "auto", "scope": [], "lines": 0, "deps": "ask", "extra_write_tools": []}
+    assert set(eff.sources.values()) == {"default"}
 
 
 # -- save and reset -----------------------------------------------------------
 
 
 def test_save_writes_current_session_settings_to_config():
-    mixer, config_set = _mixer()
-    board.handle_command("edits ask", mixer, "sess-s")
-    board.handle_command("scope add src/**", mixer, "sess-s")
-    board.handle_command("lines 120", mixer, "sess-s")
-    board.handle_command("deps block", mixer, "sess-s")
-    text = board.handle_command("save", mixer, "sess-s", save=config_set)
+    mixer, store = _mixer()
+    for raw in ("edits ask", "scope add src/**", "lines 120", "deps block"):
+        _cmd(mixer, raw, "sess-s")
+    text = _cmd(mixer, "save", "sess-s", store)
     assert "saved" in text.lower()
-    store = {}
-    board.handle_command("save", mixer, "sess-s", save=lambda k, v: store.__setitem__(k, v))
-    assert store["edits"] == "ask"
-    assert store["scope"] == ["src/**"]
-    assert store["lines"] == "120", "saved text must match the host's manifest type"
-    assert mixer.settings_for("sess-s")["lines"] == 120
-    assert store["deps"] == "block"
+    assert store["edits"] == "ask" and store["scope"] == ["src/**"] and store["deps"] == "block"
+    assert store["lines"] == 120 and isinstance(store["lines"], int)
+
+
+def test_save_one_dial_sets_a_saved_default_directly():
+    mixer, store = _mixer()
+    assert "saved" in _cmd(mixer, "save deps block", "s", store)
+    assert store == {"deps": "block"}
+    _cmd(mixer, "save lines 30", "s", store)
+    _cmd(mixer, "save lines off", "s", store)
+    assert store["lines"] == 0
+    _cmd(mixer, "save scope add a/** b/**", "s", store)
+    _cmd(mixer, "save scope remove a/**", "s", store)
+    assert store["scope"] == ["b/**"]
+    _cmd(mixer, "save scope clear", "s", store)
+    assert store["scope"] == []
+    assert "unknown" in _cmd(mixer, "save speed 9", "s", store).lower()
 
 
 def test_save_without_sink_reports_error():
     mixer, _ = _mixer()
-    text = board.handle_command("save", mixer, "s")
-    assert "not available" in text.lower() or "error" in text.lower()
+    text = _cmd(mixer, "save", "s")
+    assert "not available" in text.lower()
 
 
 def test_reset_clears_session_overrides():
     mixer, _ = _mixer({"edits": "ask"})
-    board.handle_command("edits plan", mixer, "sess-s")
-    board.handle_command("lines 50", mixer, "sess-s")
-    assert mixer.settings_for("sess-s")["edits"] == "plan"
-    text = board.handle_command("reset", mixer, "sess-s")
-    assert "reset" in text.lower()
-    assert mixer.settings_for("sess-s")["edits"] == "ask"
-    assert mixer.settings_for("sess-s")["lines"] == "off"
+    _cmd(mixer, "edits plan", "sess-s")
+    _cmd(mixer, "lines 50", "sess-s")
+    assert _eff(mixer, "sess-s")["edits"] == "plan"
+    assert "reset" in _cmd(mixer, "reset", "sess-s").lower()
+    assert _eff(mixer, "sess-s")["edits"] == "ask"
+    assert _eff(mixer, "sess-s")["lines"] == 0
 
 
-def test_reset_with_no_overrides_reports_defaults():
+def test_reset_with_no_overrides_reports_reset():
     mixer, _ = _mixer()
-    text = board.handle_command("reset", mixer, "s")
-    assert "reset" in text.lower() or "default" in text.lower()
+    assert "reset" in _cmd(mixer, "reset", "s").lower()
 
 
 def test_board_shows_session_reference():
     mixer, _ = _mixer()
-    text = board.handle_command("", mixer, "sess-9f2a")
-    assert "sess-9f2a"[:4] in text or "session" in text.lower()
+    assert "sess-9f2a" in _cmd(mixer, "", "sess-9f2a")
 
 
-def test_board_lines_show_used_of_budget():
+def test_board_lines_show_left_of_budget():
     mixer, _ = _mixer({"lines": 200})
-    mixer.lines_state.add("s-x", "task-1", 87)
-    text = board.handle_command("", mixer, "s-x")
-    assert "87" in text and "200" in text
+    mixer.begin_turn("s-x", "t1")
+    from tests.helpers import write
+    from hermes_agent_mixer.core.ports import Ports
+
+    mixer.decide("s-x", write("a.py", "1\n" * 87), Ports())
+    text = _cmd(mixer, "", "s-x")
+    assert "113 left" in text and "200" in text
 
 
-# -- session key resolution ----------------------------------------------------
+def test_commands_work_through_the_hermes_adapter_for_the_same_session(tmp_path, monkeypatch, fresh_plugin):
+    from tests.hermes_driver import mixer as run_mixer, tool
 
-
-def test_session_key_from_os_environ(monkeypatch):
-    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
-    monkeypatch.setattr(session_key_mod, "_gateway_get_session_env", None, raising=False)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HERMES_SESSION_ID", "sess-env")
-    assert session_key_mod.current_session_key() == "sess-env"
+    ctx = fresh_plugin()
+    run_mixer(ctx, "edits plan")
+    assert tool(ctx, "execute_code", {"code": "1"}, "sess-env")["action"] == "block"
+    assert tool(ctx, "execute_code", {"code": "1"}, "someone-else") is None
 
 
-def test_session_key_empty_without_host_context(monkeypatch):
-    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
-    monkeypatch.setattr(session_key_mod, "_gateway_get_session_env", None, raising=False)
-    assert session_key_mod.current_session_key() == ""
-
-
-def test_gateway_session_id_preferred_over_environ(monkeypatch):
-    monkeypatch.setenv("HERMES_SESSION_ID", "sess-env")
-    monkeypatch.setattr(session_key_mod, "_gateway_get_session_env", lambda name: "sess-gateway", raising=False)
-    assert session_key_mod.current_session_key() == "sess-gateway"
-
-
-# -- plugin-level integration: command to hook over one session ------------------
-
-
-def test_command_change_visible_to_hook_same_session(tmp_path, monkeypatch):
-    """The CLI publishes HERMES_SESSION_ID; handler and hooks bind the same key."""
-    from hermes_agent_mixer.hermes import plugin as mixer_plugin
-    from tests import conftest as conftest_mod
+def test_command_without_any_bound_session_changes_nothing(tmp_path, monkeypatch, fresh_plugin):
+    from tests.hermes_driver import mixer as run_mixer, tool
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
-    monkeypatch.setattr(mixer_plugin, "_current_session_key", lambda: "sess-env", raising=False)
-    mixer_plugin.reset_mixer()
-    ctx = conftest_mod.FakeCtx()
-    mixer_plugin.register(ctx)
-    handler = ctx.commands["mixer"]["handler"]
-    handler("edits plan")
-    hook = ctx.hooks["pre_tool_call"][0]
-    result = hook(tool_name="execute_code", args={"code": "1"}, task_id="t1",
-                  session_id="sess-env")
-    mixer_plugin.reset_mixer()
-    assert result is not None
-    assert result["action"] == "block"
-
-
-def test_command_handler_without_session_falls_back_to_global(tmp_path, monkeypatch):
-    """No host session context: /mixer edits the process-wide fallback identity."""
-    from hermes_agent_mixer.hermes import plugin as mixer_plugin
-    from tests import conftest as conftest_mod
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mixer_plugin, "_current_session_key", lambda: "", raising=False)
-    mixer_plugin.reset_mixer()
-    ctx = conftest_mod.FakeCtx()
-    mixer_plugin.register(ctx)
-    handler = ctx.commands["mixer"]["handler"]
-    handler("edits plan")
-    mixer = mixer_plugin.get_mixer()
-    assert mixer.settings_for("")["edits"] == "plan"
-    mixer_plugin.reset_mixer()
-
-
-def test_subagent_session_does_not_inherit_parent_override(tmp_path, monkeypatch):
-    """Overrides bind to the session id from the host; a child subagent session runs defaults."""
-    from hermes_agent_mixer.hermes import plugin as mixer_plugin
-    from tests import conftest as conftest_mod
-
-    monkeypatch.chdir(tmp_path)
-    mixer_plugin.reset_mixer()
-    ctx = conftest_mod.FakeCtx()
-    mixer_plugin.register(ctx)
-    handler = ctx.commands["mixer"]["handler"]
-    handler("edits plan")
-    hook = ctx.hooks["pre_tool_call"][0]
-    child = hook(tool_name="execute_code", args={"code": "1"}, task_id="child-task",
-                 session_id="child-session")
-    mixer_plugin.reset_mixer()
-    assert child is None, "subagent sessions must use defaults, not the parent's overrides"
-
-
-def test_subagent_counters_isolated_from_parent(tmp_path, monkeypatch):
-    from hermes_agent_mixer.hermes import plugin as mixer_plugin
-    from tests import conftest as conftest_mod
-
-    monkeypatch.chdir(tmp_path)
-    mixer_plugin.reset_mixer()
-    ctx = conftest_mod.FakeCtx({"lines": 3})
-    mixer_plugin.register(ctx)
-    hook = ctx.hooks["pre_tool_call"][0]
-    ok = hook(tool_name="write_file", args={"path": "a.txt", "content": "1\n2\n3\n"}, task_id="t1",
-              session_id="parent-session")
-    child = hook(tool_name="write_file", args={"path": "a.txt", "content": "1\n2\n3\n"}, task_id="child-turn",
-                 session_id="child-session")
-    mixer_plugin.reset_mixer()
-    assert ok is None, "parent's first call must fit the configured budget"
-    assert child is None, "child session starts with a fresh budget"
+    ctx = fresh_plugin()
+    reply = run_mixer(ctx, "edits plan")
+    assert "save" in reply.lower()
+    assert tool(ctx, "execute_code", {"code": "1"}, "s") is None

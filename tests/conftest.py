@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
+
+SHIM = Path(__file__).resolve().parent / "upstream_shim"
+SHIM_PACKAGES = ("gateway", "tools", "agent")
 
 
 class FakeCtx:
@@ -28,6 +34,7 @@ class FakeCtx:
             "handler": handler,
             "description": description,
             "args_hint": args_hint,
+            **kwargs,
         }
 
     def get_config(self, key, default=None):
@@ -40,6 +47,59 @@ class FakeCtx:
         self.unload_callbacks.append(callback)
 
 
+@pytest.fixture(autouse=True)
+def hermetic_environment(monkeypatch):
+    """No test may inherit a host workspace or session from the shell that runs pytest."""
+    for var in ("TERMINAL_CWD", "HERMES_SESSION_ID", "HERMES_SESSION_KEY", "AGENT_MIXER_HOME"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def fake_ctx():
     return FakeCtx()
+
+
+def _purge_shim_modules() -> None:
+    for name in list(sys.modules):
+        if name.split(".")[0] in SHIM_PACKAGES:
+            del sys.modules[name]
+
+
+@pytest.fixture
+def host_shim(monkeypatch):
+    """Verbatim upstream Hermes host modules (tests/upstream_shim) on sys.path for one test."""
+    from hermes_agent_mixer.hermes import host
+
+    _purge_shim_modules()
+    monkeypatch.syspath_prepend(str(SHIM))
+    host.reset_cache()
+    yield SHIM
+    _purge_shim_modules()
+    host.reset_cache()
+
+
+@pytest.fixture
+def no_host(monkeypatch):
+    """No Hermes host modules at all: every guarded import in hermes/host.py falls back."""
+    from hermes_agent_mixer.hermes import host
+
+    _purge_shim_modules()
+    host.reset_cache()
+    monkeypatch.setattr(host, "_import", lambda _name: None)
+    yield
+    host.reset_cache()
+
+
+@pytest.fixture
+def fresh_plugin():
+    """Registers the Hermes adapter on a new FakeCtx and returns ``new(settings) -> ctx``."""
+    from hermes_agent_mixer.hermes import plugin
+
+    def new(settings: dict | None = None) -> FakeCtx:
+        plugin.reset_mixer()
+        ctx = FakeCtx(settings)
+        plugin.register(ctx)
+        return ctx
+
+    yield new
+    plugin.reset_mixer()

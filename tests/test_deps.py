@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import json
 
-from hermes_agent_mixer.core import depsguard, decisions
+from hermes_agent_mixer.core import depsguard
+from tests.legacy import decisions
 
 
-def _knobs(deps="ask", edits="auto"):
-    return {"edits": edits, "scope": [], "lines": "off", "deps": deps, "root": None}
+def _knobs(deps="ask", edits="auto", scope=()):
+    return {"edits": edits, "scope": list(scope), "lines": "off", "deps": deps, "root": None}
 
 
 def _state():
-    from hermes_agent_mixer.core import mixer as mixer_mod
+    from tests.legacy import LinesState
 
-    return mixer_mod.Mixer()
+    return LinesState()
 
 
 # -- manifest detection primitives -------------------------------------------
@@ -177,7 +178,7 @@ def test_manifest_write_new_dep_asks(tmp_path, monkeypatch):
     )
     assert decision is not None
     assert decision["action"] == "approve"
-    assert decision["rule_key"] == "mixer:deps"
+    assert decision["rule_key"].startswith("mixer:dep:")
     assert "lodash" in decision["message"]
 
 
@@ -241,7 +242,7 @@ def test_new_requirements_file_is_a_new_dep(tmp_path, monkeypatch):
     decision = decisions.evaluate(
         "write_file",
         {"path": "requirements.txt", "content": "rich>=13\n"},
-        _knobs(deps="block"),
+        _knobs(deps="block", scope=["src/**"]),
         _state(),
         root=tmp_path,
     )
@@ -263,7 +264,7 @@ def test_terminal_install_command_asks_on_deps(tmp_path, monkeypatch):
     )
     assert decision is not None
     assert decision["action"] == "approve"
-    assert decision["rule_key"] == "mixer:deps"
+    assert decision["rule_key"].startswith("mixer:dep:")
 
 
 def test_terminal_bare_install_allowed_on_deps_block(tmp_path, monkeypatch):
@@ -295,7 +296,7 @@ def test_deps_stage_runs_after_scope(tmp_path, monkeypatch, tmp_path_factory):
     decision = decisions.evaluate(
         "write_file",
         {"path": str(outside / "package.json"), "content": json.dumps({"dependencies": {"lodash": "^4"}})},
-        _knobs(deps="ask"),
+        _knobs(deps="ask", scope=["src/**"]),
         _state(),
         root=tmp_path,
     )
@@ -314,7 +315,7 @@ def test_deps_stage_runs_before_ask(tmp_path, monkeypatch):
         _state(),
         root=tmp_path,
     )
-    assert decision["rule_key"] == "mixer:deps"
+    assert decision["rule_key"].startswith("mixer:dep:")
 
 
 def test_dep_manifest_outside_root_still_checked_needs_scope(tmp_path, monkeypatch, tmp_path_factory):
@@ -322,7 +323,7 @@ def test_dep_manifest_outside_root_still_checked_needs_scope(tmp_path, monkeypat
     decision = decisions.evaluate(
         "write_file",
         {"path": str(tmp_path_factory.mktemp("out") / "package.json"), "content": "{}"},
-        _knobs(deps="block"),
+        _knobs(deps="block", scope=["src/**"]),
         _state(),
         root=tmp_path,
     )

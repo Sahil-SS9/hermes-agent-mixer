@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from hermes_agent_mixer.core import diffcount, decisions
-from hermes_agent_mixer.core import mixer as mixer_mod
+from hermes_agent_mixer.core import diffcount
+from tests import legacy
+from tests.legacy import decisions
+from tests.legacy import LinesState
 
 
 def _knobs(lines, edits="auto"):
@@ -49,21 +51,21 @@ def test_reordered_lines_count_as_moves(tmp_path):
 
 def test_estimate_write_new_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    added, removed = diffcount.estimate("write_file", {"path": "new.txt", "content": "x\ny\n"})
+    added, removed = legacy.estimate("write_file", {"path": "new.txt", "content": "x\ny\n"})
     assert (added, removed) == (2, 0)
 
 
 def test_estimate_write_overwrite_existing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "f.txt").write_text("line1\nline2\nline3\n", encoding="utf-8")
-    added, removed = diffcount.estimate("write_file", {"path": "f.txt", "content": "line1\nCHANGED\nline3\n"})
+    added, removed = legacy.estimate("write_file", {"path": "f.txt", "content": "line1\nCHANGED\nline3\n"})
     assert (added, removed) == (1, 1)
 
 
 def test_estimate_patch_replace_mode(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "f.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
-    added, removed = diffcount.estimate(
+    added, removed = legacy.estimate(
         "patch", {"path": "f.py", "old_string": "y = 2", "new_string": "y = 3\nz = 4"}
     )
     # 'y = 2' removed, 'y = 3' and 'z = 4' added
@@ -84,7 +86,7 @@ def test_estimate_patch_v4a_mode(tmp_path, monkeypatch):
         "+four\n"
         "*** End Patch\n"
     )
-    added, removed = diffcount.estimate("patch", {"path": "f.py", "mode": "patch", "patch": patch_text})
+    added, removed = legacy.estimate("patch", {"path": "f.py", "mode": "patch", "patch": patch_text})
     # The real V4A apply yields one/two/three/four from one/two/three: a real
     # diff counts ONE added line. Raw +/- counting of the patch text would
     # overcount as (2 added, 1 removed) - this assertion proves the simulated
@@ -96,7 +98,7 @@ def test_estimate_patch_v4a_mode(tmp_path, monkeypatch):
 def test_estimate_patch_all_replace(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "f.txt").write_text("dup\ndup\n", encoding="utf-8")
-    added, removed = diffcount.estimate(
+    added, removed = legacy.estimate(
         "patch", {"path": "f.txt", "old_string": "dup", "new_string": "new", "replace_all": True}
     )
     assert added == 2
@@ -105,7 +107,7 @@ def test_estimate_patch_all_replace(tmp_path, monkeypatch):
 
 def test_estimate_missing_path_is_zero(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    assert diffcount.estimate("write_file", {}) == (0, 0)
+    assert legacy.estimate("write_file", {}) == (0, 0)
 
 
 # -- budget behaviour through the decision engine -----------------------------
@@ -132,8 +134,7 @@ def test_block_message_gives_remaining_budget_and_suggests_summarising(tmp_path,
 
 def test_budget_exactly_met_allows(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    mixer = mixer_mod.Mixer()
-    state = mixer.lines_state
+    state = LinesState()
     ok = decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state)
     assert ok is None
     # no session/task ids: the process-wide fallback key
@@ -142,7 +143,7 @@ def test_budget_exactly_met_allows(tmp_path, monkeypatch):
 
 def test_cumulative_across_calls_in_one_turn(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    state = mixer_mod.Mixer().lines_state
+    state = LinesState()
     assert decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state) is None
     second = decisions.evaluate("write_file", {"path": "b.txt", "content": "1\n"}, _knobs(3), state)
     assert second is not None
@@ -160,8 +161,7 @@ def test_blocked_call_does_not_consume_budget(tmp_path, monkeypatch):
 
 
 def _mixer_state():
-    mixer = mixer_mod.Mixer()
-    return mixer
+    return LinesState()
 
 
 # -- turn reset and isolation -------------------------------------------------
@@ -169,7 +169,7 @@ def _mixer_state():
 
 def test_turn_reset_via_pre_llm_call(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    state = mixer_mod.Mixer().lines_state
+    state = LinesState()
     assert decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state,
                               session_id="t", task_id="task") is None
     state.reset_turn("t", "task")
@@ -180,7 +180,7 @@ def test_turn_reset_via_pre_llm_call(tmp_path, monkeypatch):
 
 def test_task_ids_isolate_counters(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    state = mixer_mod.Mixer().lines_state
+    state = LinesState()
     assert decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state) is None
     other = decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state,
                                task_id="turn-2")
@@ -189,7 +189,7 @@ def test_task_ids_isolate_counters(tmp_path, monkeypatch):
 
 def test_sessions_isolate_counters(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    state = mixer_mod.Mixer().lines_state
+    state = LinesState()
     assert decisions.evaluate("write_file", {"path": "a.txt", "content": "1\n2\n3\n"}, _knobs(3), state,
                               session_id="s1") is None
     other = decisions.evaluate("write_file", {"path": "b.txt", "content": "1\n2\n3\n"}, _knobs(3), state,
@@ -223,7 +223,7 @@ def test_lines_stage_order_after_scope(tmp_path, monkeypatch):
         {"edits": "auto", "scope": ["src/**"], "lines": 2, "deps": "allow", "root": None}, state)
     assert decision is not None
     assert "scope" in decision["message"]
-    assert state.lines_state.used("", "") == 0
+    assert state.used("", "") == 0
 
 
 def test_patch_counting_works_through_decisions(tmp_path, monkeypatch):

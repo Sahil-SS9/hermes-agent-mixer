@@ -1,215 +1,194 @@
 """Decision engine for Agent Mixer.
 
-Order: plan -> scope -> deps -> lines -> ask. The first block wins. Returns a
-directive dict ({"action": "block"|"approve", ...}) or None to allow.
+Order: plan -> scope -> deps -> lines -> ask. The first deny wins. ``decide`` takes a normalised
+:class:`Call` and returns a :class:`Decision` (deny or ask), or None for "no opinion" (D10: Mixer
+only restricts, it never says allow).
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import posixpath
 from typing import Any
 
-from hermes_agent_mixer.core import depsguard, diffcount, patches, scope as scope_mod
-from hermes_agent_mixer.core import terminal as terminal_mod
+from hermes_agent_mixer.core import depsguard, diffcount, scope as scope_mod, shell
+from hermes_agent_mixer.core.calls import Call, Decision
 
-_FILE_TOOLS = ("write_file", "patch")
+NO_BYPASS = "Don't retry this through terminal or execute_code."
 
-_PLAN_MESSAGE_WRITE = (
-    "blocked by mixer:edits: plan mode is read-only. {tool} was prevented. "
-    "Leave it with /mixer edits auto (or ask)."
+_PLAN_WRITE = (
+    "blocked by mixer:edits: plan mode is read-only; {tool} was prevented. " + NO_BYPASS +
+    " Leave plan mode with /mixer edits auto (or ask)."
+)
+_PLAN_SHELL = (
+    "blocked by mixer:edits: plan mode limits terminal to read-only commands; segment {index} is not "
+    "read-only. " + NO_BYPASS + " Leave plan mode with /mixer edits auto (or ask)."
+)
+_ASK = (
+    "mixer:edits needs your approval for {tool} on {path}. The call waits for you - approve, "
+    "always-allow (remembered for this file only) or deny."
+)
+_DEPS_BLOCK = (
+    "blocked by mixer:deps: this would add new dependencies ({names}). " + NO_BYPASS +
+    " Raise it deliberately with /mixer deps ask or allow."
+)
+_DEPS_ASK = (
+    "mixer:deps: this would add new dependencies ({names}). The call waits for your approval - "
+    "deny it if you did not intend a new dependency."
+)
+_LINES = (
+    "blocked by mixer:lines: this change is {need} lines (added+removed). You have used {used} of the "
+    "{budget}-line budget this turn, {remaining} remain. " + NO_BYPASS +
+    " Stop and summarise the turn, or raise the budget with /mixer lines N."
+)
+_SCOPE_UNREADABLE = (
+    "blocked by mixer:scope: cannot identify the files this patch touches. " + NO_BYPASS +
+    " Use a valid patch or separate path-based edits."
+)
+_SCOPE_SHELL = (
+    "blocked by mixer:scope: this command writes '{target}' (best-effort read of the command), which is not "
+    "in scope (allowed globs: {globs}). " + NO_BYPASS + " Add a glob with /mixer scope add <glob>, or "
+    "write inside the allowed paths."
 )
 
-_PLAN_MESSAGE_TERMINAL = (
-    "blocked by mixer:edits: plan mode limits terminal to read-only commands. "
-    "Segment {index} is not read-only. Leave it with /mixer edits auto (or ask)."
-)
-
-_ASK_MESSAGE = (
-    "mixer:edits needs your approval for {tool}. The call waits for you - "
-    "approve, always-allow (remembered per rule), or deny."
-)
-
-_DEPS_BLOCK_MESSAGE = (
-    "blocked by mixer:deps: this would add new dependencies ({names}). "
-    "Raise it deliberately with /mixer deps ask or allow."
-)
-
-_DEPS_ASK_MESSAGE = (
-    "mixer:deps: this would add new dependencies ({names}). "
-    "The call waits for your approval - deny it if you did not intend a new dependency."
-)
-
-_LINES_MESSAGE = (
-    "blocked by mixer:lines: this change is {need} lines (added+removed). "
-    "You have used {used} of the {budget}-line budget this turn, {remaining} remain. "
-    "Stop and summarise the turn, or raise the budget with /mixer lines N."
-)
+_MANIFESTS = ("package.json", "pyproject.toml", "cargo.toml", "go.mod")
+_FILE_KINDS = ("write", "edit", "patch")
+_SHELL_ECOSYSTEM = {"npm": "npm", "pnpm": "npm", "yarn": "npm", "bun": "npm", "cargo": "cargo", "go": "go"}
 
 
-def evaluate(tool_name: str, args: dict[str, Any], knobs: dict[str, Any],
-             state: Any = None, *, root: Path | None = None,
-             session_id: str = "", task_id: str = "") -> dict[str, str] | None:
-    """Run the ordered stages and return the winning directive (or None).
+def _deny(stage: str, message: str) -> Decision:
+    return Decision("deny", message, stage=stage)
 
-    ``state`` carries the mixer's turn counters (optional; budget stage is
-    skipped without one). ``root`` overrides the project root; the hook passes
-    ``session_id``/``task_id`` for counter keying.
-    """
-    edits = (knobs.get("edits") or "auto").lower()
-    scope_globs = [str(g) for g in (knobs.get("scope") or [])]
-    deps_mode = (knobs.get("deps") or "ask").lower()
-    lines_budget = knobs.get("lines")
-    root_value = root if root is not None else knobs.get("root")
-    root_dir = Path(str(root_value)) if root_value else Path.cwd()
-    session_key = (session_id or task_id or "")
 
-    if tool_name in _FILE_TOOLS:
+def _is_manifest(path_text: str) -> bool:
+    name = posixpath.basename(path_text.replace("\\", "/")).lower()
+    return name in _MANIFESTS or (name.startswith("requirements") and name.endswith(".txt"))
+
+
+def file_targets(call: Call, ports: Any, task_id: str | None) -> list[str] | None:
+    if call.kind == "patch":
+        return diffcount.patch_targets(call, ports, task_id)
+    if not call.path:
+        return []
+    return [ports.resolve(call.path, task_id)]
+
+
+def decide(call: Call, knobs: dict[str, Any], ports: Any, budget: Any, task_id: str | None = None) -> Decision | None:
+    """Run the ordered stages for one call."""
+    edits = str(knobs.get("edits") or "auto").lower()
+    if call.kind in _FILE_KINDS:
+        return _file_call(call, knobs, edits, ports, budget, task_id)
+    if call.kind == "code":
         if edits == "plan":
-            return {"action": "block", "message": _PLAN_MESSAGE_WRITE.format(tool=tool_name)}
-        if tool_name == "patch" and args.get("mode") == "patch":
-            try:
-                targets = patches.paths(str(args.get("patch") or ""))
-            except ValueError:
-                targets = []
-            if not targets:
-                return {"action": "block", "message":
-                        "blocked by mixer:scope: cannot identify bulk-patch targets. "
-                        "Use a valid patch or separate path-based edits."}
-        else:
-            targets = [str(args.get("path") or "")]
-        for path_text in targets:
-            message = scope_mod.check_scope(path_text, scope_globs, root_dir)
-            if message:
-                return {"action": "block", "message": message}
-        deps_directive = _manifest_deps_directive(tool_name, args, root_dir, deps_mode)
-        if deps_directive and deps_directive["action"] == "block":
-            return deps_directive
-        lines_directive = _lines_directive(
-            tool_name, args, root_dir, lines_budget, state, session_key, task_id)
-        if lines_directive:
-            return lines_directive
-        # Approval cannot bypass a later hard limit. Reserve the permitted diff
-        # before prompting, just as for edits:ask (denials are conservative).
-        if deps_directive:
-            return deps_directive
-        if edits == "ask":
-            return {
-                "action": "approve",
-                "message": _ASK_MESSAGE.format(tool=tool_name),
-                "rule_key": "mixer:edits",
-            }
+            return _deny("edits", _PLAN_WRITE.format(tool=call.label))
         return None
-
-    if tool_name == "execute_code":
-        if edits == "plan":
-            return {"action": "block", "message": _PLAN_MESSAGE_WRITE.format(tool=tool_name)}
-        return None
-
-    if tool_name == "terminal":
-        command = str(args.get("command") or "")
-        if edits == "plan":
-            all_read_only, bad_index = terminal_mod.classify_command(command)
-            if not all_read_only:
-                return {
-                    "action": "block",
-                    "message": _PLAN_MESSAGE_TERMINAL.format(index=bad_index + 1),
-                }
-        return _terminal_deps_directive(command, deps_mode)
-
+    if call.kind == "shell":
+        return _shell_call(call, knobs, edits, ports, task_id)
     return None
 
 
-# -- deps stage ---------------------------------------------------------------
+# -- file tools -----------------------------------------------------------------------------
 
 
-def _manifest_deps_directive(tool_name: str, args: dict[str, Any], root_dir: Path,
-                             deps_mode: str) -> dict[str, str] | None:
-    if deps_mode not in ("block", "ask"):
+def _file_call(call: Call, knobs: dict, edits: str, ports: Any, budget: Any, task_id: str | None) -> Decision | None:
+    if edits == "plan":
+        return _deny("edits", _PLAN_WRITE.format(tool=call.label))
+    globs = [str(g) for g in (knobs.get("scope") or [])]
+    deps_mode = str(knobs.get("deps") or "ask").lower()
+    lines_budget = knobs.get("lines") or 0
+
+    targets = file_targets(call, ports, task_id)
+    if globs:
+        if targets is None:
+            return _deny("scope", _SCOPE_UNREADABLE)
+        root = ports.workspace_root(task_id)
+        for target in targets:
+            if not scope_mod.allowed(target, globs, root, windows=ports.windows):
+                return _deny("scope", scope_mod.not_in_scope_message(target, globs, NO_BYPASS))
+
+    proposed: list[diffcount.Change] | None = None
+
+    def changes() -> list[diffcount.Change]:
+        nonlocal proposed
+        if proposed is None:
+            proposed = diffcount.changes(call, ports, task_id)
+        return proposed
+
+    deps_decision = _manifest_deps(changes, deps_mode, targets) if deps_mode in ("block", "ask") else None
+    if deps_decision and deps_decision.action == "deny":
+        return deps_decision
+    if lines_budget and budget is not None:
+        total = sum(change.lines() for change in changes())
+        if total > 0:
+            allowed, used = budget.reserve(total, lines_budget)
+            if not allowed:
+                return _deny("lines", _LINES.format(need=total, used=used, budget=lines_budget,
+                                                    remaining=max(lines_budget - used, 0)))
+    # Approval cannot bypass a later hard limit: the permitted diff is reserved before prompting.
+    if deps_decision:
+        return deps_decision
+    if edits == "ask":
+        shown = ", ".join(targets) if targets else (call.path or call.label)
+        key = "mixer:edit:" + ";".join(sorted(targets or [call.path or call.label]))
+        return Decision("ask", _ASK.format(tool=call.label, path=shown), key, "edits")
+    return None
+
+
+def _manifest_deps(changes: Any, deps_mode: str, targets: list[str] | None) -> Decision | None:
+    if not any(_is_manifest(t) for t in (targets or [])):
         return None
-    targets = (patches.paths(str(args.get("patch") or ""))
-               if tool_name == "patch" and args.get("mode") == "patch"
-               else [str(args.get("path") or "")])
-    if not any(_is_manifest_path(path) for path in targets):
+    found: dict[str, set[str]] = {}
+    for change in changes():
+        if not _is_manifest(change.path):
+            continue
+        names: list[str] | None = None
+        if change.simulated:
+            names = depsguard.compare_names(change.path, change.before, change.after)
+        if names is None:  # not simulated, or a side that does not parse: compare the call's own text
+            before = depsguard.fragment_names(change.path, change.old_fragment)
+            after = depsguard.fragment_names(change.path, change.new_fragment)
+            names = sorted(after - before)
+        if names:
+            found.setdefault(depsguard.ecosystem(change.path), set()).update(names)
+    return _deps_decision(found, deps_mode)
+
+
+def _deps_decision(found: dict[str, set[str]], deps_mode: str) -> Decision | None:
+    if not found:
         return None
-    proposed = diffcount.changes(tool_name, args, root_dir)
-    if proposed is None:
-        return {"action": "block", "message":
-                "blocked by mixer:deps: cannot inspect the proposed manifest change. "
-                "Use an exact path-based edit or fix the patch anchors."}
-    names = sorted({name for path, before, after in proposed if _is_manifest_path(path)
-                    for name in depsguard.detect_new_deps(path, before, after)})
-    if not names:
-        return None
-    shown = ", ".join(names)
+    pairs = [(eco, name) for eco, names in sorted(found.items()) for name in sorted(names)]
+    shown = ", ".join(name for _eco, name in pairs)
     if deps_mode == "block":
-        return {"action": "block", "message": _DEPS_BLOCK_MESSAGE.format(names=shown)}
-    return {
-        "action": "approve",
-        "message": _DEPS_ASK_MESSAGE.format(names=shown),
-        "rule_key": "mixer:deps",
-    }
+        return _deny("deps", _DEPS_BLOCK.format(names=shown))
+    key = "mixer:dep:" + ",".join(f"{eco}:{name}" for eco, name in pairs)
+    return Decision("ask", _DEPS_ASK.format(names=shown), key, "deps")
 
 
-def _terminal_deps_directive(command: str, deps_mode: str) -> dict[str, str] | None:
-    if deps_mode not in ("block", "ask"):
-        return None
-    import shlex
-
-    for tokens in terminal_mod.split_segments(command):
-        try:
-            segment = shlex.join(tokens)
-        except ValueError:
-            segment = " ".join(tokens)
-        classified = depsguard.classify_install(segment)
-        if not classified:
-            continue
-        kind, names = classified
-        if kind != "new" or not names:
-            continue
-        shown = ", ".join(names)
-        if deps_mode == "block":
-            return {"action": "block", "message": _DEPS_BLOCK_MESSAGE.format(names=shown)}
-        return {
-            "action": "approve",
-            "message": _DEPS_ASK_MESSAGE.format(names=shown),
-            "rule_key": "mixer:deps",
-        }
-    return None
+# -- shell --------------------------------------------------------------------------------------
 
 
-def _is_manifest_path(path_text: str) -> bool:
-    from pathlib import PurePosixPath
-
-    name = PurePosixPath(path_text.replace("\\", "/")).name.lower()
-    if name in ("package.json", "pyproject.toml", "cargo.toml", "go.mod"):
-        return True
-    return name.startswith("requirements") and name.endswith(".txt")
-
-
-# -- lines stage ---------------------------------------------------------------
-
-
-def _lines_directive(tool_name: str, args: dict[str, Any], root_dir: Path,
-                     lines_budget: Any, state: Any, session_key: str,
-                     task_id: str) -> dict[str, str] | None:
-    if state is None or not isinstance(lines_budget, int):
-        return None
-    counters = state.lines_state if hasattr(state, "lines_state") else state
-    proposed = diffcount.changes(tool_name, args, root_dir)
-    if proposed is None:
-        return {"action": "block", "message":
-                "blocked by mixer:lines: cannot count this change from a real diff. "
-                "Use an exact path-based edit or fix the patch anchors."}
-    total = sum(sum(diffcount.count_diff_lines(before, after))
-                for _path, before, after in proposed)
-    if total <= 0:
-        return None
-    allowed, used = counters.reserve(session_key, task_id, total, lines_budget)
-    remaining = lines_budget - used
-    if not allowed:
-        return {
-            "action": "block",
-            "message": _LINES_MESSAGE.format(need=total, used=used, budget=lines_budget,
-                                             remaining=max(remaining, 0)),
-        }
+def _shell_call(call: Call, knobs: dict, edits: str, ports: Any, task_id: str | None) -> Decision | None:
+    command = call.command or ""
+    deps_mode = str(knobs.get("deps") or "ask").lower()
+    if edits == "plan":
+        ok, bad = shell.classify_plan(command, call.shell)
+        if not ok:
+            return _deny("edits", _PLAN_SHELL.format(index=bad + 1))
+    globs = [str(g) for g in (knobs.get("scope") or [])]
+    if globs and edits != "plan" and call.shell == "posix":
+        base = ports.resolve(call.cwd, task_id) if call.cwd else None
+        root = ports.workspace_root(task_id)
+        for target in shell.write_targets(command):
+            where = ports.resolve(target.base, task_id, base=base) if target.base is not None else base
+            resolved = ports.resolve(target.path, task_id, base=where)
+            inside = scope_mod.allowed(resolved, globs, root, windows=ports.windows) or (
+                target.directory and scope_mod.allowed(resolved.rstrip("/") + "/x", globs, root, windows=ports.windows))
+            if not inside:
+                return _deny("scope", _SCOPE_SHELL.format(target=resolved, globs=", ".join(globs)))
+    if call.shell == "posix" and deps_mode in ("block", "ask"):
+        for words in shell.split_segments(command):
+            classified = depsguard.classify_install(shell.quote_words(words))
+            if not classified or classified[0] != "new" or not classified[1]:
+                continue
+            eco = _SHELL_ECOSYSTEM.get(words[0].rsplit("/", 1)[-1], "pypi")
+            return _deps_decision({eco: set(classified[1])}, deps_mode)
     return None

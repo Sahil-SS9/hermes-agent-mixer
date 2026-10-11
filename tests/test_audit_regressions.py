@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_agent_mixer.core import decisions, diffcount
+from hermes_agent_mixer.core import diffcount
+from tests import legacy
+from tests.legacy import decisions
 from hermes_agent_mixer.hermes import plugin
-from hermes_agent_mixer.core.mixer import LinesState
+from tests.legacy import LinesState
 
 
 def knobs(**overrides):
@@ -115,7 +117,7 @@ def test_r3_dependency_approval_reserves_the_allowed_budget(tmp_path):
         '{"dependencies": {"new-package": "1.0"}}\n'},
         knobs(deps="ask", lines=1), state, root=tmp_path, session_id="s", task_id="t")
     assert result is not None and result["action"] == "approve"
-    assert result["rule_key"] == "mixer:deps"
+    assert result["rule_key"] == "mixer:dep:npm:new-package"
     assert state.used("s", "t") == 1
     second = decisions.evaluate("write_file", {"path": "extra.txt", "content": "hi\n"},
         knobs(deps="ask", lines=1), state, root=tmp_path, session_id="s", task_id="t")
@@ -141,7 +143,7 @@ def test_r5_tilde_paths_read_the_actual_before_state(tmp_path, monkeypatch, tool
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     (home / "large.txt").write_text("".join(f"old-{i}\n" for i in range(20)), encoding="utf-8")
-    assert diffcount.estimate(tool, {"path": "~/large.txt", **args}, tmp_path) == expected
+    assert legacy.estimate(tool, {"path": "~/large.txt", **args}, tmp_path) == expected
 
 
 def test_r5_tilde_overwrite_is_blocked_by_real_diff(tmp_path, monkeypatch):

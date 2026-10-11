@@ -7,7 +7,7 @@ Hermes plugin (``/mixer`` plus ``pre_tool_call`` / ``pre_llm_call`` hooks) and a
 """
 
 __all__ = ["register"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def register(ctx):

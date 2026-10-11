@@ -6,9 +6,9 @@ from threading import Barrier
 
 import pytest
 
-from hermes_agent_mixer.core import decisions
+from tests.legacy import decisions
 from hermes_agent_mixer.hermes import plugin
-from hermes_agent_mixer.core.mixer import LinesState
+from tests.legacy import LinesState
 
 
 @pytest.mark.parametrize("new_task", ["new-turn", "old-turn"])
@@ -26,13 +26,13 @@ def test_r4_board_resets_only_current_session_at_turn_boundary(tmp_path, monkeyp
                     session_id="parent", task_id="old-turn") is None
         assert hook(tool_name="write_file", args={"path": "child.txt", "content": "child\n"},
                     session_id="child", task_id="child-turn") is None
-        assert "1 / 2 this turn" in fake_ctx.commands["mixer"]["handler"]("")
+        assert "1 left this turn" in fake_ctx.commands["mixer"]["handler"]("")
         begin(session_id="parent", task_id=new_task)
-        assert "0 / 2 this turn" in fake_ctx.commands["mixer"]["handler"]("")
-        assert plugin.get_mixer().lines_state.session_used("child") == 1
+        assert "2 left this turn" in fake_ctx.commands["mixer"]["handler"]("")
+        assert plugin.get_mixer().effective("child").left == 1  # an unlinked session keeps its own turn
         assert hook(tool_name="write_file", args={"path": "two.txt", "content": "one\ntwo\n"},
                     session_id="parent", task_id=new_task) is None
-        assert "2 / 2 this turn" in fake_ctx.commands["mixer"]["handler"]("")
+        assert "0 left this turn" in fake_ctx.commands["mixer"]["handler"]("")
     finally:
         plugin.reset_mixer()
 
@@ -71,13 +71,14 @@ def test_unload_reload_rebinds_saved_defaults_and_discards_budget(tmp_path, monk
         fake_ctx._settings.update(edits="plan", lines=2)
         plugin.register(fake_ctx)
         old = plugin.get_mixer()
-        assert old.settings_for("s")["edits"] == "plan"
-        old.lines_state.add("s", "t", 2)
+        assert old.effective("s")["edits"] == "plan"
+        old.set_session("s", "edits", "ask")
+        old.begin_turn("s", "t")
         for callback in fake_ctx.unload_callbacks:
             callback()
         new_ctx = type(fake_ctx)({"edits": "auto", "lines": 1})
         plugin.register(new_ctx)
-        assert plugin.get_mixer().settings_for("s")["edits"] == "auto"
-        assert plugin.get_mixer().lines_state.session_used("s") == 0
+        fresh = plugin.get_mixer().effective("s")
+        assert fresh["edits"] == "auto" and fresh["lines"] == 1 and fresh.left == 1
     finally:
         plugin.reset_mixer()

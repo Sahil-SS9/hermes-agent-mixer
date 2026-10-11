@@ -12,6 +12,8 @@ _HEADER = re.compile(r"^\*\*\*\s*(Update|Add|Delete|Move)\s+File:\s*(.+)")
 _BEGIN = re.compile(r"^\*\*\*\s*Begin\s+Patch\s*$")
 _END = re.compile(r"^\*\*\*\s*End\s+Patch\s*$")
 _MOVE = re.compile(r"(.+?)\s*->\s*(.+)")
+_MOVE_TO = re.compile(r"^\*\*\*\s*Move\s+to:\s*(.+)")
+_EOF = re.compile(r"^\*\*\*\s*End\s+of\s+File\s*$")
 
 
 @dataclass
@@ -34,6 +36,14 @@ def parse(text: str) -> list[Operation]:
     result: list[Operation] = []
     current: Operation | None = None
     for line in lines[start:end]:
+        move_to = _MOVE_TO.match(line)
+        if move_to:  # Codex apply_patch: "*** Move to:" follows an Update File header
+            if current is None or current.kind != "Update":
+                raise ValueError("Move to without an Update File header")
+            current.destination = move_to.group(1).strip()
+            continue
+        if _EOF.match(line):
+            continue
         match = _HEADER.match(line)
         if match:
             kind, path = match.groups()

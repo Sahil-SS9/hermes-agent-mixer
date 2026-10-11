@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hermes_agent_mixer.core import decisions
+from tests.legacy import decisions
 
 
 def _knobs(**overrides):
@@ -28,7 +28,7 @@ def test_ask_returns_approve_directive_with_rule_key(tmp_path, monkeypatch):
     decision = decisions.evaluate("write_file", {"path": "src/a.py", "content": "x"}, _knobs(edits="ask"))
     assert decision is not None
     assert decision["action"] == "approve"
-    assert decision["rule_key"] == "mixer:edits"
+    assert decision["rule_key"].startswith("mixer:edit:") and decision["rule_key"].endswith("src/a.py")
     assert decision.get("message")
 
 
@@ -124,8 +124,11 @@ def test_plan_message_explains_how_to_leave(tmp_path, monkeypatch):
 
 def test_plan_respects_quotes_when_splitting(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    decision = decisions.evaluate("terminal", {"command": "echo 'a && rm -rf x'"}, _knobs(edits="plan"))
-    assert decision is not None, "quoted && must not split into a read-only second segment"
+    from hermes_agent_mixer.core import shell
+
+    assert shell.split_segments("echo 'a && rm -rf x'") == [["echo", "a && rm -rf x"]]
+    assert decisions.evaluate("terminal", {"command": "echo 'a && rm -rf x'"}, _knobs(edits="plan")) is None
+    assert decisions.evaluate("terminal", {"command": "echo a && rm -rf x"}, _knobs(edits="plan")) is not None
 
 
 def test_plan_blocks_write_in_second_segment(tmp_path, monkeypatch):
