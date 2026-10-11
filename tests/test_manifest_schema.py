@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from hermes_agent_mixer import board, settings
-from hermes_agent_mixer.mixer import Mixer
+from hermes_agent_mixer.core import board, settings
+from hermes_agent_mixer.core.mixer import Mixer
 
 
 @pytest.mark.parametrize('value,normalised', [('off', 'off'), ('120', 120)])

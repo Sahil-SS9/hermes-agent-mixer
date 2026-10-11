@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_agent_mixer import board, mixer as mixer_mod, session_key as session_key_mod
+from hermes_agent_mixer.core import board, mixer as mixer_mod
+from hermes_agent_mixer.hermes import host as session_key_mod
 
 
 def _mixer(settings=None):
@@ -24,12 +25,12 @@ def _mixer(settings=None):
 
 def test_show_renders_board_with_knob_values():
     mixer, _ = _mixer({"scope": ["src/**", "tests/**"]})
-    text = board.handle_command("", mixer, "sess-abc", approvals_mode="manual")
+    text = board.handle_command("", mixer, "sess-abc")
     assert "Agent Mixer" in text
     assert "edits" in text and "auto" in text and "[ACTIVE]" in text
     assert "src/**" in text and "tests/**" in text
     assert "deps" in text and "ask" in text
-    assert "manual" in text
+    assert "approvals" in text  # the Hermes approvals rule is stated in words
 
 
 def test_show_shows_lines_off_or_budget():
@@ -193,7 +194,7 @@ def test_gateway_session_id_preferred_over_environ(monkeypatch):
 
 def test_command_change_visible_to_hook_same_session(tmp_path, monkeypatch):
     """The CLI publishes HERMES_SESSION_ID; handler and hooks bind the same key."""
-    from hermes_agent_mixer import plugin as mixer_plugin
+    from hermes_agent_mixer.hermes import plugin as mixer_plugin
     from tests import conftest as conftest_mod
 
     monkeypatch.chdir(tmp_path)
@@ -214,7 +215,7 @@ def test_command_change_visible_to_hook_same_session(tmp_path, monkeypatch):
 
 def test_command_handler_without_session_falls_back_to_global(tmp_path, monkeypatch):
     """No host session context: /mixer edits the process-wide fallback identity."""
-    from hermes_agent_mixer import plugin as mixer_plugin
+    from hermes_agent_mixer.hermes import plugin as mixer_plugin
     from tests import conftest as conftest_mod
 
     monkeypatch.chdir(tmp_path)
@@ -231,7 +232,7 @@ def test_command_handler_without_session_falls_back_to_global(tmp_path, monkeypa
 
 def test_subagent_session_does_not_inherit_parent_override(tmp_path, monkeypatch):
     """Overrides bind to the session id from the host; a child subagent session runs defaults."""
-    from hermes_agent_mixer import plugin as mixer_plugin
+    from hermes_agent_mixer.hermes import plugin as mixer_plugin
     from tests import conftest as conftest_mod
 
     monkeypatch.chdir(tmp_path)
@@ -248,7 +249,7 @@ def test_subagent_session_does_not_inherit_parent_override(tmp_path, monkeypatch
 
 
 def test_subagent_counters_isolated_from_parent(tmp_path, monkeypatch):
-    from hermes_agent_mixer import plugin as mixer_plugin
+    from hermes_agent_mixer.hermes import plugin as mixer_plugin
     from tests import conftest as conftest_mod
 
     monkeypatch.chdir(tmp_path)

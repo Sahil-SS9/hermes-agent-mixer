@@ -9,8 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hermes_agent_mixer import depsguard, diffcount, patches, scope as scope_mod
-from hermes_agent_mixer import terminal as terminal_mod
+from hermes_agent_mixer.core import depsguard, diffcount, patches, scope as scope_mod
+from hermes_agent_mixer.core import terminal as terminal_mod
 
 _FILE_TOOLS = ("write_file", "patch")
 

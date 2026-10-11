@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from hermes_agent_mixer import diffcount, decisions
-from hermes_agent_mixer import mixer as mixer_mod
+from hermes_agent_mixer.core import diffcount, decisions
+from hermes_agent_mixer.core import mixer as mixer_mod
 
 
 def _knobs(lines, edits="auto"):

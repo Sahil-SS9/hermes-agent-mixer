@@ -10,7 +10,7 @@ import difflib
 from pathlib import Path
 from typing import Any
 
-from hermes_agent_mixer import patches
+from hermes_agent_mixer.core import patches
 
 
 def count_diff_lines(before: str | None, after: str | None) -> tuple[int, int]:

@@ -12,7 +12,7 @@ import pytest
 
 from scripts import sandbox_home
 from tests import conftest as conftest_mod
-from hermes_agent_mixer import plugin as mixer_plugin
+from hermes_agent_mixer.hermes import plugin as mixer_plugin
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HERMES_BIN = shutil.which("hermes") or "/home/kensei/.local/bin/hermes"

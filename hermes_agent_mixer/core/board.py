@@ -1,7 +1,7 @@
 """Board rendering for Agent Mixer.
 
 The board shows the four knobs (active value marked), the current session's
-lines usage and Hermes' own approvals mode for context. Plain text only.
+lines usage. Plain text only.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ _USAGE = (
 
 
 def handle_command(raw_args: str, mixer: Any, session_key: str, *,
-                   save: Any = None, approvals_mode: str | None = None) -> str:
+                   save: Any = None) -> str:
     """Handle one /mixer invocation; returns the reply text."""
     tokens = (raw_args or "").strip().split()
     if not tokens or tokens[0] == "show":
-        return render_board(mixer, session_key, approvals_mode=approvals_mode)
+        return render_board(mixer, session_key)
     sub, args = tokens[0], tokens[1:]
 
     if sub == "edits":
@@ -124,7 +124,7 @@ def render_scope_lines(mixer: Any, session_key: str) -> str:
     return f"  scope   {_fmt_scope(globs)}{note}"
 
 
-def render_board(mixer: Any, session_key: str, *, approvals_mode: str | None = None) -> str:
+def render_board(mixer: Any, session_key: str) -> str:
     """One screenshot-style board."""
     settings = mixer.settings_for(session_key)
     lines = [
@@ -133,8 +133,7 @@ def render_board(mixer: Any, session_key: str, *, approvals_mode: str | None = N
         render_scope_lines(mixer, session_key),
         f"  lines   {_lines_cell(mixer, session_key, settings['lines'])}",
         _knob_line("deps  ", ("allow", "ask", "block"), settings["deps"]),
-        "  Hermes approvals: {}.  (/yolo or approvals.mode to change; not a Mixer knob)".format(
-            approvals_mode if approvals_mode else "unknown"),
+        "  ask uses Hermes' own approvals gate: /yolo or approvals.mode off skips it, and not a Mixer knob.",
     ]
     return "\n".join(lines)
 

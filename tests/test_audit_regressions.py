@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_agent_mixer import decisions, diffcount, plugin
-from hermes_agent_mixer.mixer import LinesState
+from hermes_agent_mixer.core import decisions, diffcount
+from hermes_agent_mixer.hermes import plugin
+from hermes_agent_mixer.core.mixer import LinesState
 
 
 def knobs(**overrides):

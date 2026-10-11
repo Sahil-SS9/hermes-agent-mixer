@@ -6,8 +6,9 @@ from threading import Barrier
 
 import pytest
 
-from hermes_agent_mixer import decisions, plugin
-from hermes_agent_mixer.mixer import LinesState
+from hermes_agent_mixer.core import decisions
+from hermes_agent_mixer.hermes import plugin
+from hermes_agent_mixer.core.mixer import LinesState
 
 
 @pytest.mark.parametrize("new_task", ["new-turn", "old-turn"])

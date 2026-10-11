@@ -9,17 +9,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes_agent_mixer import decisions
-from hermes_agent_mixer.board import handle_command as _board_handle
-from hermes_agent_mixer.mixer import Mixer
-from hermes_agent_mixer import session_key as _session_key_mod
+from hermes_agent_mixer.core import decisions
+from hermes_agent_mixer.core.board import handle_command as _board_handle
+from hermes_agent_mixer.core.mixer import Mixer
+from hermes_agent_mixer.hermes import host as _host
 
 _HOOKS_WIRED: list[str] = []
 
 _MIXER: Mixer | None = None
 _CONFIG_GET: Any = None
 _CONFIG_SET: Any = None
-_current_session_key = _session_key_mod.current_session_key
+_current_session_key = _host.current_session_key
 
 
 def get_mixer() -> Mixer:
@@ -68,22 +68,7 @@ def _mixer_command(raw_args: str = "") -> str | None:
     return _board_handle(
         raw_args, mixer, session,
         save=_CONFIG_SET,
-        approvals_mode=_approvals_mode(),
     )
-
-
-def _approvals_mode() -> str | None:
-    """Hermes' current approvals mode, for context display only.
-
-    Plugins have no ctx API for top-level config; this mirrors how bundled
-    plugins read host config (guarded, display-only)."""
-    try:
-        from hermes_cli.config import load_config_readonly
-
-        mode = ((load_config_readonly() or {}).get("approvals") or {}).get("mode")
-        return str(mode) if isinstance(mode, str) and mode else None
-    except Exception:
-        return None
 
 
 def register(ctx: Any) -> None:

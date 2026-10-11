@@ -22,7 +22,7 @@ markers = [
 ]
 
 [tool.setuptools]
-packages = ["hermes_agent_mixer"]
+packages = ["hermes_agent_mixer", "hermes_agent_mixer.core", "hermes_agent_mixer.hermes", "hermes_agent_mixer.harness"]
 
 [build-system]
 requires = ["setuptools>=77.0"]

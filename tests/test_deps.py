@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from hermes_agent_mixer import depsguard, decisions
+from hermes_agent_mixer.core import depsguard, decisions
 
 
 def _knobs(deps="ask", edits="auto"):
@@ -12,7 +12,7 @@ def _knobs(deps="ask", edits="auto"):
 
 
 def _state():
-    from hermes_agent_mixer import mixer as mixer_mod
+    from hermes_agent_mixer.core import mixer as mixer_mod
 
     return mixer_mod.Mixer()
 

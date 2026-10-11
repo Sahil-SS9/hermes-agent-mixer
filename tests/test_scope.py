@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from hermes_agent_mixer import scope
+from hermes_agent_mixer.core import scope
 
 
 def test_relative_path_inside_scope_glob(tmp_path, monkeypatch):

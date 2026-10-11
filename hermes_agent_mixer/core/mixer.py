@@ -10,7 +10,7 @@ from __future__ import annotations
 from threading import RLock
 from typing import Any, Callable
 
-from hermes_agent_mixer import settings as settings_mod
+from hermes_agent_mixer.core import settings as settings_mod
 
 GLOBAL_SESSION = ""
 

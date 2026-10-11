@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hermes_agent_mixer import decisions
+from hermes_agent_mixer.core import decisions
 
 
 def _knobs(**overrides):
