@@ -1,50 +1,37 @@
-"""Saved-default schema fidelity: what /mixer save writes is what the host accepts.
+"""Saved line budgets use one host-supported type for both N and off.
 
-The manifest must declare a schema that matches the plugin's own saved shapes,
-or ctx.set_config emits host warnings and a declared-but-wrong schema silently
-blocks the Desktop/TUI settings surface (plugins_manifest.validate_config_schema).
+Unit tests cover the plugin's real save/reset behaviour. The complementary
+native test uses Hermes' actual YAML loader, schema validator and settings writer.
+No imitation YAML parser or copied host type validator is used here.
 """
-from __future__ import annotations
-
 from pathlib import Path
 
-from hermes_agent_mixer import board, manifest
+import pytest
+
+from hermes_agent_mixer import board, settings
 from hermes_agent_mixer.mixer import Mixer
 
 
-def _manifest_spec():
-    return manifest.loads((Path(__file__).resolve().parents[1] / "plugin.yaml").read_text())["config_schema"]
+@pytest.mark.parametrize('value,normalised', [('off', 'off'), ('120', 120)])
+def test_saved_line_value_is_text_and_reload_preserves_policy(value, normalised):
+    stored = {}
+    mixer = Mixer(config_get=lambda key, default=None: stored.get(key, default))
+    board.handle_command('lines ' + value, mixer, 's')
+    assert mixer.settings_for('s')['lines'] == normalised
+    assert 'saved' in board.handle_command('save', mixer, 's', save=stored.__setitem__)
+    assert stored['lines'] == value
+    assert isinstance(stored['lines'], str)
+    board.handle_command('lines 1' if value == 'off' else 'lines off', mixer, 's')
+    board.handle_command('reset', mixer, 's')
+    assert mixer.settings_for('s')['lines'] == normalised
+    assert Mixer(config_get=lambda key, default=None: stored.get(key, default)).settings_for('new')['lines'] == normalised
 
 
-_HOST_TYPES = {"str": str, "int": int, "float": float, "bool": bool,
-               "list": list, "dict": dict, "secret": str}
-
-
-def test_save_matches_declared_config_schema(tmp_path):
-    mixer = Mixer()
-    for command in ("edits ask", "scope add src/**", "lines 120", "deps block"):
-        board.handle_command(command, mixer, "s")
-    saved: dict = {}
-    board.handle_command("save", mixer, "s", save=lambda key, value: saved.__setitem__(key, value))
-    for name, spec in _manifest_spec().items():
-        declared = str(spec["type"]).strip().lower()
-        value = saved[name]
-        expected = _HOST_TYPES[declared]
-        assert isinstance(value, expected), (name, declared, type(value).__name__)
-        if declared == "int":
-            assert not isinstance(value, bool), name
-
-
-def test_manifest_normalised_default_matches_the_declared_schema():
-    from hermes_agent_mixer import settings
-    defaults = settings.defaults()
-    for name, spec in _manifest_spec().items():
-        declared = str(spec["type"]).strip().lower()
-        if name == "lines":
-            # Optional budget: unset/off and any positive number are both valid.
-            assert defaults[name] == "off" or isinstance(defaults[name], int)
-            continue
-        assert isinstance(defaults[name], _HOST_TYPES[declared]), (name, declared)
-        if "default" in spec and declared not in ("list", "dict"):
-            # list/dict defaults may be mutable representations; scalar defaults must agree.
-            assert defaults[name] == spec["default"], name
+def test_manifest_declares_text_for_line_setting():
+    # Narrow check of this repository's authored block, not a YAML parser.
+    # Actual parsing/type admission is exercised by the native-host test.
+    text = (Path(__file__).resolve().parents[1] / 'plugin.yaml').read_text()
+    block = text.split('\n  lines:\n', 1)[1].split('\n  deps:\n', 1)[0]
+    assert '    type: str\n' in block
+    assert '    default: "off"\n' in block
+    assert settings.defaults()['lines'] == 'off'

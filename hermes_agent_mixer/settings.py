@@ -4,8 +4,8 @@ Raw values arrive from plugin config (possibly anything YAML gave) and from
 /mixer commands (strings). Everything is normalised here; invalid values fall
 back to defaults instead of breaking enforcement.
 
-The manifest declares lines as int with an optional default: "off" (disabled)
-is represented as the string sentinel; any positive number is the budget.
+The manifest declares saved lines as text: "off" or a numeric string.
+Runtime normalisation converts numeric text to a positive integer budget.
 """
 
 from __future__ import annotations

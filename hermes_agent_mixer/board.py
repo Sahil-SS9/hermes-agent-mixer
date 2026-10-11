@@ -102,7 +102,10 @@ def _save(mixer: Any, session_key: str, save: Any) -> str:
         return "mixer: save is not available here (config writer missing)."
     effective = mixer.settings_for(session_key)
     for knob in ("edits", "scope", "lines", "deps"):
-        save(knob, effective[knob])
+        # The host schema accepts one scalar type. Persist both N and off as
+        # text; settings.normalise converts numeric text back into a budget.
+        value = str(effective[knob]) if knob == "lines" else effective[knob]
+        save(knob, value)
     return "mixer: saved these as the plugin defaults (all new sessions start here)."
 
 

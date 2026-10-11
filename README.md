@@ -56,7 +56,7 @@ The receipt scripts create fresh sandboxes and stop on any failed command. The E
 | `/mixer save` | Persist the current settings as the plugin defaults via `ctx.set_config`. |
 | `/mixer reset` | Drop this session's overrides, back to the saved defaults. |
 
-State is per session. Changes only touch the current session until you `/mixer save`, which writes the plugin config defaults (so one-shot runs like `hermes chat -q` get them too). Settings also come straight from plugin config without any command:
+State is per session. Changes only touch the current session until you `/mixer save`, which writes the plugin config defaults (so one-shot runs like `hermes chat -q` get them too). Saved line limits are text (`"off"` or `"200"`) to match the host's settings schema; enforcement still uses an integer budget. Existing integer config values remain readable. Settings also come straight from plugin config without any command:
 
 ```yaml
 plugins:
@@ -67,7 +67,7 @@ plugins:
       settings:
         edits: auto
         scope: ["src/**", "tests/**"]
-        lines: "off"        # or a positive number of lines
+        lines: "off"        # or a quoted positive number, e.g. "200"
         deps: ask
 ```
 

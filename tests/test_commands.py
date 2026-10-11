@@ -125,7 +125,8 @@ def test_save_writes_current_session_settings_to_config():
     board.handle_command("save", mixer, "sess-s", save=lambda k, v: store.__setitem__(k, v))
     assert store["edits"] == "ask"
     assert store["scope"] == ["src/**"]
-    assert store["lines"] == 120
+    assert store["lines"] == "120", "saved text must match the host's manifest type"
+    assert mixer.settings_for("sess-s")["lines"] == 120
     assert store["deps"] == "block"
 
 
