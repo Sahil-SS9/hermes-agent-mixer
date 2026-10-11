@@ -15,6 +15,8 @@ import sys
 import tempfile
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from scripts import sandbox_home  # noqa: E402
 NAME = "hermes-agent-mixer"
 BASE_URL = "http://127.0.0.1:8091/v1"
 
@@ -24,8 +26,12 @@ def run_receipt(mode: str, evidence: Path) -> None:
     evidence.mkdir(parents=True, exist_ok=True)
     sandbox = Path(tempfile.mkdtemp(prefix=f"{mode}-", dir=evidence))
     home, hermes_home, tmp, project = (sandbox / name for name in ("home", "hermes-home", "tmp", "project"))
-    for folder in (home, hermes_home, tmp, project / "src"):
+    for folder in (home, tmp, project / "src"):
         folder.mkdir(parents=True, exist_ok=True)
+    if "HERMES_BIN" in os.environ:  # an explicitly labelled test double: nothing to share
+        hermes_home.mkdir(parents=True, exist_ok=True)
+    else:  # real Hermes: share tools/, cache/ and installs/ with the cached base home (P2)
+        sandbox_home.make_home(hermes_home)
     # Retain non-secret runtime/process settings but prevent accidental provider
     # or platform credential inheritance in the disposable CLI.
     env = {key: value for key, value in os.environ.items()

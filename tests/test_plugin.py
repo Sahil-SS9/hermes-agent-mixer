@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import sandbox_home
 from tests import conftest as conftest_mod
 from hermes_agent_mixer import plugin as mixer_plugin
 
@@ -191,12 +192,14 @@ def _make_fixture_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _hermes_env(tmp_path: Path) -> dict:
-    """Sandboxed environment for hermes subprocesses: no live home, no display."""
+def _hermes_env(tmp_path: Path, hermes_home: Path) -> dict:
+    """Sandboxed environment for hermes subprocesses: no live home, no display.
+
+    ``hermes_home`` comes from scripts.sandbox_home.make_home: a thin home that shares the cached
+    base home's tools/, cache/ and installs/ (P2), so no run builds its own 1.6 GB home.
+    """
     home = tmp_path / "home"
-    hermes_home = tmp_path / "hermes-home"
     home.mkdir()
-    hermes_home.mkdir()
     tmpdir = tmp_path / "tmp"
     tmpdir.mkdir()
     env = {k: v for k, v in os.environ.items()}
@@ -248,9 +251,10 @@ class TestSandboxInstallAndLoad:
 
     @pytest.fixture(scope="class")
     @classmethod
-    def sandbox(cls, tmp_path_factory) -> dict:
+    def sandbox(cls, tmp_path_factory):
         root = tmp_path_factory.mktemp("sandbox-install")
-        env = _hermes_env(root)
+        hermes_home = sandbox_home.make_home(sandbox_home.cache_root() / "runs" / root.name)
+        env = _hermes_env(root, hermes_home)
         _write_sandbox_config(Path(env["HERMES_HOME"]))
         fixture = _make_fixture_repo(root)
         # --yes-deps: the pyproject.toml next to plugin.yaml makes the installer
@@ -258,12 +262,13 @@ class TestSandboxInstallAndLoad:
         # explicit answer is required or the install is declined before anything
         # lands. The plugin's runtime is standard-library-only.
         install = _run([HERMES_BIN, "plugins", "install", f"file://{fixture}", "--enable", "--yes-deps"], env)
-        return {
+        yield {
             "env": env,
             "hermes_home": Path(env["HERMES_HOME"]),
             "fixture": fixture,
             "install": install,
         }
+        shutil.rmtree(hermes_home, ignore_errors=True)  # removes the symlinks, never the shared base
 
     def test_installs_into_sandbox_and_hermes_plugins_list_shows_no_errors(self, sandbox):
         """The real installer accepts the plugin via a file:// clone and
