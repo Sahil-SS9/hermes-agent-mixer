@@ -161,7 +161,7 @@ def _estimate_patch(before_text: str, args: dict[str, Any], root: Path | None) -
 def _read_before(path_value: Any, root: Path | None) -> str | None:
     if not isinstance(path_value, str) or not path_value:
         return None
-    candidate = Path(path_value)
+    candidate = Path(path_value).expanduser()
     if not candidate.is_absolute() and root is not None:
         candidate = Path(root) / candidate
     try:

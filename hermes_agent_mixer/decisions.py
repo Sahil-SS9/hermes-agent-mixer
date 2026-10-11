@@ -82,12 +82,16 @@ def evaluate(tool_name: str, args: dict[str, Any], knobs: dict[str, Any],
             if message:
                 return {"action": "block", "message": message}
         deps_directive = _manifest_deps_directive(tool_name, args, root_dir, deps_mode)
-        if deps_directive:
+        if deps_directive and deps_directive["action"] == "block":
             return deps_directive
         lines_directive = _lines_directive(
             tool_name, args, root_dir, lines_budget, state, session_key, task_id)
         if lines_directive:
             return lines_directive
+        # Approval cannot bypass a later hard limit. Reserve the permitted diff
+        # before prompting, just as for edits:ask (denials are conservative).
+        if deps_directive:
+            return deps_directive
         if edits == "ask":
             return {
                 "action": "approve",

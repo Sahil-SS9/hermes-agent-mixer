@@ -16,7 +16,7 @@ _MANIFEST_BASENAMES = {"package.json", "pyproject.toml", "cargo.toml", "go.mod"}
 
 # Pip requirement line: name before any version/extra/whitespace.
 _PIP_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
-_PEP508_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*[\[\(=>~<!; ]|$")
+_PEP508_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:[\[\(=>~<!; @]|$)")
 
 _GOMOD_SINGLE = re.compile(r"^\s*require\s+([^\s]+)\s+(v[\w.]+|-)")
 _GOMOD_BLOCK_LINE = re.compile(r"^\s*([A-Za-z0-9][^\s/]*/[^\s]+)\s+(v[\w.]+|-)")

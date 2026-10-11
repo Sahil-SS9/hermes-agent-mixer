@@ -95,3 +95,82 @@ def test_r2_bulk_patch_inside_scope_is_allowed(tmp_path):
         "*** Begin Patch\n*** Update File: src/a.txt\n@@\n-old\n+new\n*** Add File: src/b.txt\n+hi\n*** End Patch\n"},
         knobs(scope=["src/**"]), root=tmp_path)
     assert result is None
+
+
+@pytest.mark.parametrize("edits", ["auto", "ask"])
+def test_r3_line_limit_blocks_before_dependency_approval(tmp_path, edits):
+    state = LinesState()
+    result = decisions.evaluate("write_file", {"path": "package.json", "content":
+        '{\n  "dependencies": {\n    "new-package": "1.0"\n  }\n}\n'},
+        knobs(edits=edits, deps="ask", lines=1), state, root=tmp_path, session_id="s", task_id="t")
+    assert result is not None and result["action"] == "block"
+    assert "mixer:lines" in result["message"]
+    assert state.used("s", "t") == 0
+
+
+def test_r3_dependency_approval_reserves_the_allowed_budget(tmp_path):
+    state = LinesState()
+    result = decisions.evaluate("write_file", {"path": "package.json", "content":
+        '{"dependencies": {"new-package": "1.0"}}\n'},
+        knobs(deps="ask", lines=1), state, root=tmp_path, session_id="s", task_id="t")
+    assert result is not None and result["action"] == "approve"
+    assert result["rule_key"] == "mixer:deps"
+    assert state.used("s", "t") == 1
+    second = decisions.evaluate("write_file", {"path": "extra.txt", "content": "hi\n"},
+        knobs(deps="ask", lines=1), state, root=tmp_path, session_id="s", task_id="t")
+    assert second is not None and second["action"] == "block"
+
+
+def test_r3_dependency_block_still_precedes_line_block(tmp_path):
+    state = LinesState()
+    result = decisions.evaluate("write_file", {"path": "package.json", "content":
+        '{"dependencies": {"new-package": "1.0"}}\n'},
+        knobs(deps="block", lines=0), state, root=tmp_path)
+    assert result is not None and result["action"] == "block"
+    assert "mixer:deps" in result["message"]
+    assert state.used("", "") == 0
+
+
+@pytest.mark.parametrize("tool,args,expected", [
+    ("write_file", {"content": "new\n"}, (1, 20)),
+    ("patch", {"old_string": "old-0", "new_string": "new"}, (1, 1)),
+])
+def test_r5_tilde_paths_read_the_actual_before_state(tmp_path, monkeypatch, tool, args, expected):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    (home / "large.txt").write_text("".join(f"old-{i}\n" for i in range(20)), encoding="utf-8")
+    assert diffcount.estimate(tool, {"path": "~/large.txt", **args}, tmp_path) == expected
+
+
+def test_r5_tilde_overwrite_is_blocked_by_real_diff(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    (home / "large.txt").write_text("".join(f"old-{i}\n" for i in range(20)), encoding="utf-8")
+    result = decisions.evaluate("write_file", {"path": "~/large.txt", "content": "new\n"},
+        knobs(lines=1), LinesState(), root=tmp_path)
+    assert result is not None and result["action"] == "block"
+    assert "21 lines" in result["message"]
+
+
+@pytest.mark.parametrize("section", [
+    '[project]\ndependencies = ["requests"]\n',
+    '[project.optional-dependencies]\nextra = ["requests"]\n',
+    '[dependency-groups]\ndev = ["requests"]\n',
+])
+def test_r6_unversioned_pyproject_dependency_is_detected(tmp_path, section):
+    result = decisions.evaluate("write_file", {"path": "pyproject.toml", "content": section},
+        knobs(deps="block"), root=tmp_path)
+    assert result is not None and result["action"] == "block"
+    assert "requests" in result["message"]
+
+
+@pytest.mark.parametrize("after", [
+    '[project]\ndependencies = ["requests>=2"]\n',
+    '[project]\ndependencies = []\n',
+])
+def test_r6_existing_bare_dependency_bump_or_removal_is_allowed(tmp_path, after):
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["requests"]\n', encoding="utf-8")
+    assert decisions.evaluate("write_file", {"path": "pyproject.toml", "content": after},
+        knobs(deps="block"), root=tmp_path) is None
