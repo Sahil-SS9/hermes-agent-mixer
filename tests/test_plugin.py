@@ -247,7 +247,8 @@ class TestSandboxInstallAndLoad:
     """
 
     @pytest.fixture(scope="class")
-    def sandbox(self, tmp_path_factory) -> dict:
+    @classmethod
+    def sandbox(cls, tmp_path_factory) -> dict:
         root = tmp_path_factory.mktemp("sandbox-install")
         env = _hermes_env(root)
         _write_sandbox_config(Path(env["HERMES_HOME"]))

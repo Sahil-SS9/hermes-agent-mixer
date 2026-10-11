@@ -32,7 +32,17 @@ Notes:
 - If your build's installer refuses a local `file://` source with a dependency-consent error, run `hermes plugins install file://... --enable --yes-deps` exactly as above; a bare local path (no `file://`) is treated as a GitHub URL.
 - Verify the load with `hermes plugins list` (shows `hermes-agent-mixer  enabled`) and `hermes plugins doctor hermes-agent-mixer --ci`.
 
-The plugin is also a pip entry-point package (`hermes_agent.plugins` group, module `hermes_agent_mixer`), declared under `[project.entry-points]` in pyproject.toml, so a `pip install` of this repo works with hosts that resolve plugins from that entry-point group.
+The plugin also declares a pip entry point in the `hermes_agent.plugins` group (module `hermes_agent_mixer`). This works when the installation owner supplies an unmanaged Python environment. For a managed Hermes install, use the directory-plugin installer so its environment manager admits the plugin; do not inject packages into a live managed generation.
+
+Developer checks (use disposable HOME, HERMES_HOME and TMPDIR, not your live profile):
+
+```bash
+uv run --locked pytest -q
+bash scripts/sandbox_install_load_check.sh /path/to/evidence
+bash scripts/e2e_run.sh /path/to/evidence
+```
+
+The receipt scripts create fresh sandboxes and stop on any failed command. The E2E script uses only `http://127.0.0.1:8091/v1`, model `auto`, and requires the host's actual `write_file` scope-block error, not a prose claim in the chat output.
 
 ## Commands
 
@@ -81,11 +91,11 @@ False-positive guards: a bare `npm install` or `uv sync` restores existing deps 
 
 Every `pre_tool_call` runs the stages in a fixed order - plan, scope, deps, lines, ask - and the first block wins.
 
-- `write_file` / `patch`: plan blocks; scope resolves the target (symlinks included) and checks project-root containment, then the glob list; a manifest edit with a new dependency entry is judged by the deps knob; the simulated before/after diff is checked against the lines budget; `ask` hands the call to Hermes' approval gate with `rule_key: mixer:edits`.
+- `write_file` / `patch`: plan blocks; scope checks every target, including bulk patch Add/Update/Delete/Move sources and destinations, after resolving symlinks. The deps guard checks every affected manifest. The lines guard checks per-file before/after diffs. All hard blocks are checked before returning an approval, so approving a dependency cannot override a line limit. Approval requests use `rule_key: mixer:deps` or `mixer:edits`.
 - `execute_code`: blocked in plan mode, otherwise untouched (its writes cannot be scoped statically).
-- `terminal`: in plan mode every segment (split on `;`, `&&`, `||`, `|`, quotes respected) must be read-only: an allowlist (`ls`, `cat`, `head`, `tail`, `grep`, `rg`, `find` without `-delete`/`-exec`, `wc`, `tree`, `pwd`, `which`, `env`) plus read-only `git` (`status`, `diff`, `log`, `show`, `branch`, `rev-parse`); any redirect (`>`, `>>`, `tee`) counts as a write. Install commands are classified for the deps knob. In auto mode terminal commands are not scope-checked (Mixer cannot know); that is what the "Not a sandbox" section explains.
-- The turn counter resets in `pre_llm_call`, which fires once per turn.
-- State is kept per session: hooks key by the session (or task) identity the host passes; a process-wide fallback covers surfaces that pass no identity. Subagents: delegated subagents run in-process, and their tool calls pass through the same `pre_tool_call` hooks with their own session identity (verified in upstream `agent/tool_executor.py::_pre_tool_block` and `tools/delegate_tool.py`, which build child agents in-process). A child therefore starts from the saved defaults with a fresh lines counter and does not inherit the parent's session overrides. Test with `/mixer` changes and a delegated task, and treat child-agent scope as defaults-driven.
+- `terminal`: the quote-aware scanner splits shell chains even without spaces. Redirects, `tee`, background jobs, substitutions, commands launched through `env`, branch creation and known writing options are blocked in plan mode. Quoted operator characters remain literal data. The allowlist includes ordinary reads and non-writing forms of `find` and `git`; unknown forms are blocked. In auto mode terminal commands are not scope-checked.
+- The turn counter resets in `pre_llm_call`, including when the host changes the task ID. Parallel calls reserve budget atomically. Usage is reserved before execution or approval: a denied or failed call can conservatively consume budget until the next turn. Bulk moves count as removal at the source plus addition at the destination. A patch that cannot be simulated is blocked when a line budget or affected-manifest guard is active; use an exact path-based edit instead.
+- State is per session: the host's session ID takes precedence over its task ID, with a process-wide fallback when both are absent. In-process child agents pass through the same hooks with separate IDs, so they use saved defaults and a fresh counter, not the parent's unsaved overrides. Save the intended defaults before delegating. Session isolation is tested without spawning an agent; the child dispatch path is also checked against host source. An external agent process must load the plugin separately.
 - Messages to the model are short and actionable: what was blocked, which knob, what to do instead.
 
 ## Not a sandbox
