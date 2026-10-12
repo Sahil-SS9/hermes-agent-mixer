@@ -18,9 +18,10 @@ USAGE = """Usage:
   agent-mixer [--session ID | --saved] <dial> <value>   dials: edits ask|auto|plan, scope add|remove|clear <glob>,
                                                         lines N|off, deps allow|ask|block, save <dial> <value>
   agent-mixer [--session ID] board                       show the dials and where each value comes from
-  agent-mixer hook claude|codex|gemini                   handle one hook event (reads stdin)
+  agent-mixer hook claude|codex|gemini                    one hook event on stdin
   agent-mixer install|uninstall claude|codex|gemini [--project] [--yes] [--settings-json]
   agent-mixer doctor                                     check installs, settings and state
+  agent-mixer ui [--session ID | --saved] [--port N] [--no-open]   the steering console in a browser
   agent-mixer --version
 With neither --session nor --saved, the latest session seen in this folder is used."""
 
@@ -56,6 +57,10 @@ def main(argv: list[str] | None = None, *, stdin: str | None = None, env: dict |
         from hermes_agent_mixer.harness import doctor
 
         return doctor.run(environ, here)
+    if args[0] == "ui":
+        from hermes_agent_mixer import ui
+
+        return ui.run(args[1:], environ, here)
     return _command(args, environ, here)
 
 

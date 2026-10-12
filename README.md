@@ -78,6 +78,7 @@ The same grammar works in a shell, and `/mixer` typed in any harness is handled 
 ```
 agent-mixer [--session ID | --saved] <dial> <value>
 agent-mixer [--session ID] board
+agent-mixer ui [--session ID | --saved] [--port N] [--no-open]
 ```
 
 - With `--session ID` the change goes to that session (it need not have been seen yet). With `--saved` it edits the saved defaults. With neither, it acts on the latest session seen in the current folder and says which; if none has been seen it fails and suggests `--saved`.
@@ -87,6 +88,15 @@ agent-mixer [--session ID] board
 ### Desktop settings
 
 The manifest declares every setting with a label, a description and its type, so Hermes Desktop (Settings, Plugins) shows a real form: `edits` and `deps` are dropdowns, `lines` is a number field, `scope` and `extra_write_tools` are lists. An invalid saved `edits` or `deps` never weakens a dial: it falls back to `ask`, is logged, and shows on the board with a warning.
+
+### Steering console (browser)
+
+`agent-mixer ui` opens a local steering console in the same retro style as the project artwork: the four dials as segmented sliders, a live `STEERING POLICY (PREVIEW)` JSON panel, and buttons for copy / save / reset. It is a real control panel, not a mock: every change goes through the same grammar and store as the CLI, and the page polls the dials every few seconds.
+
+- Binds `127.0.0.1` only; pass `--port N` to change the port (default 8377), `--no-open` to skip opening a browser.
+- `--session ID` steers that session; `--saved` steers the saved defaults; with neither it picks the latest session seen in this folder.
+- The write endpoint requires a per-run token and refuses cross-origin requests, so another site cannot drive your dials. It changes dials only — it can never run tools or touch files.
+- Hermes plugin users: the console edits the CLI harness's saved settings (`settings.json`), which are separate from the Hermes plugin settings (see above). Steer a Hermes session's dials with `/mixer` in that chat.
 
 ```yaml
 plugins:
@@ -217,6 +227,7 @@ New:
 - **X3** A file-backed session store with one lock, so parallel hook calls never lose an update.
 - **X4, X5, X6** Claude Code, Codex and Gemini CLI hook adapters (Codex and Gemini contract-tested only; `ask` becomes deny there).
 - **X7** `agent-mixer install`, `uninstall` and `doctor`.
+- **X8** `agent-mixer ui`: a local browser steering console (loopback-only, token-guarded) over the same grammar and store; the four dials as segmented sliders with a live steering-policy JSON preview.
 
 Compatibility: the `/mixer` grammar and the saved-setting keys are unchanged; saved 0.1 configs (including text `lines`) keep working.
 
