@@ -13,9 +13,15 @@
 // The Settings ▸ Plugins form (from the manifest's config_schema) stays the config path; this
 // page is a live view + quick-tweak over the same dials.
 
-import { host, STATUSBAR_AREAS, ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
+import { host } from '@hermes/plugin-sdk'
 import { useState, useEffect, useCallback } from 'react'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
+
+// Area ids as literal strings (the proven disk-plugin pattern — stewardship uses literals too;
+// importing the SDK's area constants is unnecessary and one more thing that can fail to resolve).
+const ROUTES_AREA = 'routes'
+const SIDEBAR_NAV_AREA = 'sidebar.nav'
+const STATUSBAR_RIGHT = 'statusBar.right'
 
 const TICKS = 20
 const EDITS_POS = { plan: 0, ask: 12, auto: 19 } // LESS CONSERVATIVE -> MORE FREEDOM
@@ -28,14 +34,14 @@ const el = (tag, props, ...children) => jsx(tag, { ...props }, ...children)
 const frag = (...children) => jsx(Fragment, {}, ...children)
 
 function useMixerState(ctx) {
-  const [state, setState] = useState(null)
+  const [state, setState] = useState({ pending: true })
   const [log, setLog] = useState(null)
   const refresh = useCallback(async () => {
     try {
-      const data = await ctx.rest('/state?session=SESS-DESKTOP')
-      setState(data)
+      const data = await ctx.rest('/state?session=SESS-DESKTOP', { timeoutMs: 8000 })
+      setState(data && data.dials ? data : { error: 'unexpected backend response: ' + JSON.stringify(data).slice(0, 140) })
     } catch (error) {
-      setState({ error: String(error && error.message || error) })
+      setState({ error: String((error && error.message) || error) })
     }
   }, [ctx])
   const send = useCallback(async (command) => {
@@ -44,11 +50,13 @@ function useMixerState(ctx) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command, session: 'SESS-DESKTOP' }),
+        timeoutMs: 8000,
       })
-      setState(res.state)
-      setLog({ ok: res.ok !== false, text: res.reply })
+      if (res && res.state && res.state.dials) setState(res.state)
+      setLog({ ok: res && res.ok !== false, text: (res && res.reply) || 'done' })
     } catch (error) {
-      setLog({ ok: false, text: String(error && error.message || error) })
+      setLog({ ok: false, text: String((error && error.message) || error) })
+      setState({ error: String((error && error.message) || error) })
     }
   }, [ctx])
   useEffect(() => {
@@ -122,14 +130,17 @@ function Row({ num, name, desc, source, slider, value }) {
 
 function ConsolePage({ ctx }) {
   const { state, log, send } = useMixerState(ctx)
-  if (!state) {
-    return el('div', { style: { padding: 24, color: 'var(--ui-text-tertiary)' } }, 'Loading Agent Mixer…')
-  }
   if (state.error) {
-    return el('div', { style: { padding: 24, color: '#fb923c' } },
-      'Agent Mixer backend unavailable: ' + state.error,
-      el('div', { style: { color: 'var(--ui-text-tertiary)', marginTop: 8, fontSize: 13 } },
-        'Check that the plugin is in plugins.enabled and the gateway has been restarted.'))
+    return el('div', { style: { padding: 24 } },
+      el('div', { style: { fontWeight: 700, letterSpacing: '.14em', marginBottom: 8 } }, 'AGENT MIXER'),
+      el('div', { style: { color: '#fb923c', marginBottom: 8 } }, 'Backend unavailable: ' + state.error),
+      el('div', { style: { color: 'var(--ui-text-tertiary)', fontSize: 13 } },
+        'Check plugins.enabled in config.yaml, restart the gateway, and confirm dashboard/plugin_api.py is deployed beside plugin.yaml.'))
+  }
+  if (state.pending || !state.dials) {
+    return el('div', { style: { padding: 24, color: 'var(--ui-text-tertiary)' } },
+      el('div', { style: { fontWeight: 700, letterSpacing: '.14em', marginBottom: 8 } }, 'AGENT MIXER'),
+      'Loading dials (v3)…')
   }
   const dials = state.dials
   const pick = (dial, mapping, i) => {
@@ -204,7 +215,7 @@ function ConsolePage({ ctx }) {
 
 function Pill({ ctx }) {
   const { state } = useMixerState(ctx)
-  if (!state || state.error) return null
+  if (!state || state.error || state.pending || !state.dials) return null
   const d = state.dials
   const summary = [d.edits.value, d.scope.value.length ? 'scoped' : 'unscoped',
     d.lines.value > 0 ? `${d.lines.left ?? d.lines.value} left` : 'lines off', d.deps.value].join(' · ')
@@ -236,11 +247,11 @@ export default {
       {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
-        data: { path: '/agent-mixer', label: 'Agent Mixer', codicon: 'sliders-horizontal' },
+        data: { path: '/agent-mixer', label: 'Mixer Console', codicon: 'sliders-horizontal' },
       },
       {
         id: 'pill',
-        area: STATUSBAR_AREAS.right,
+        area: STATUSBAR_RIGHT,
         order: 120,
         render: () => jsx(Pill, { ctx }),
       },
