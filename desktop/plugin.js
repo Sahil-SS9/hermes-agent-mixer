@@ -14,6 +14,7 @@
 // page is a live view + quick-tweak over the same dials.
 
 import { host, STATUSBAR_AREAS, ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
+import { useState, useEffect, useCallback } from 'react'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
 
 const TICKS = 20
@@ -27,7 +28,6 @@ const el = (tag, props, ...children) => jsx(tag, { ...props }, ...children)
 const frag = (...children) => jsx(Fragment, {}, ...children)
 
 function useMixerState(ctx) {
-  const { useState, useEffect, useCallback } = React
   const [state, setState] = useState(null)
   const [log, setLog] = useState(null)
   const refresh = useCallback(async () => {
