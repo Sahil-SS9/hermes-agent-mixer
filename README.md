@@ -103,14 +103,19 @@ Apply one with `/mixer preset <name>` (or `agent-mixer --saved preset <name>` to
 
 The manifest declares every setting with a label, a description and its type, so Hermes Desktop (Settings, Plugins) shows a real form: `edits` and `deps` are dropdowns, `lines` is a number field, `scope` and `extra_write_tools` are lists. An invalid saved `edits` or `deps` never weakens a dial: it falls back to `ask`, is logged, and shows on the board with a warning.
 
-### Steering console (browser)
+### Steering console (Desktop + Dashboard)
 
-`agent-mixer ui` opens a local steering console in the same retro style as the project artwork: the four dials as segmented sliders, a live `STEERING POLICY (PREVIEW)` JSON panel, and buttons for copy / save / reset. It is a real control panel, not a mock: every change goes through the same grammar and store as the CLI, and the page polls the dials every few seconds.
+The console ships as a **unified package**: this repo's `desktop/plugin.js` and `dashboard/plugin_api.py` load natively into the Desktop app and web dashboard — no browser tab, no separate server.
 
-- Binds `127.0.0.1` only; pass `--port N` to change the port (default 8377), `--no-open` to skip opening a browser.
-- `--session ID` steers that session; `--saved` steers the saved defaults; with neither it picks the latest session seen in this folder.
-- The write endpoint requires a per-run token and refuses cross-origin requests, so another site cannot drive your dials. It changes dials only — it can never run tools or touch files.
-- Hermes plugin users: the console edits the CLI harness's saved settings (`settings.json`), which are separate from the Hermes plugin settings (see above). Steer a Hermes session's dials with `/mixer` in that chat.
+- **Status bar (Desktop):** a live pill showing the dials at a glance (`auto · scoped · 30 left · ask`). Click it to open the console.
+- **Console page (Desktop + Dashboard):** the retro sliders as native app UI, at `Agent Mixer` in the sidebar (or `/agent-mixer`). Every change goes through the same grammar and store as the CLI, and is enforced by the hooks on the next tool call.
+- **Settings ▸ Plugins:** the manifest's `config_schema` renders there automatically; saving writes the saved defaults the same way `ctx.set_config()` does.
+
+Install (unified package): put this repo at `~/.hermes/plugins/hermes-agent-mixer/` (or symlink it), add `hermes-agent-mixer` to `plugins.enabled` in `config.yaml`, then run `hermes dashboard` and/or the Desktop app. Enable the desktop half in Capabilities → Plugins (it ships off by default, like every desktop half). `ctx.rest` returning 404 means the backend isn't mounted: check `plugins.enabled` and restart the gateway.
+
+### Steering console (CLI, optional)
+
+`agent-mixer ui` also serves the console as a local web page — useful over SSH. It binds `127.0.0.1` only, is token-guarded, and changes dials only. `--port N` (default 8377), `--no-open` to skip opening a browser.
 
 ```yaml
 plugins:
@@ -241,7 +246,7 @@ New:
 - **X3** A file-backed session store with one lock, so parallel hook calls never lose an update.
 - **X4, X5, X6** Claude Code, Codex and Gemini CLI hook adapters (Codex and Gemini contract-tested only; `ask` becomes deny there).
 - **X7** `agent-mixer install`, `uninstall` and `doctor`.
-- **X8** `agent-mixer ui`: a local browser steering console (loopback-only, token-guarded) over the same grammar and store; the four dials as segmented sliders with a live steering-policy JSON preview.
+- **X8** Steering console: native in the Desktop app and web dashboard (`desktop/plugin.js` + `dashboard/plugin_api.py`, status-bar pill + `/agent-mixer` page + sidebar row over `/api/plugins/agent-mixer/`), plus the optional local `agent-mixer ui` web helper (loopback-only, token-guarded).
 - **X9** Presets: `/mixer preset builder|auditor|explorer|surgical` applies a named bundle of all four dials through the same target path (`preset show` lists them; unknown names change nothing).
 
 Compatibility: the `/mixer` grammar and the saved-setting keys are unchanged; saved 0.1 configs (including text `lines`) keep working.
