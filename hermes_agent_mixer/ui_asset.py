@@ -322,7 +322,7 @@ function setSlider(dial, on) {
   $("handle-" + dial).style.left = pct(on) + "%";
 }
 
-const CHOICE_POS = { edits: { ask: 0, auto: 12, plan: 19 }, deps: { block: 0, ask: 12, allow: 19 } };
+const CHOICE_POS = { edits: { plan: 0, ask: 12, auto: 19 }, deps: { block: 0, ask: 12, allow: 19 } };
 
 function draw() {
   $("s-target").textContent = state.session || "…";
