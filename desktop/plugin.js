@@ -494,31 +494,32 @@ function ConsolePage({ api }) {
     const existing = document.getElementById(rootId)
     if (!existing) return
     const d = snapshot && snapshot.dials
+    // React elements are trees, not DOM nodes: compose the whole tree, children inline, then morph.
+    const body = !d
+      ? el('div', { style: { color: '#fb923c', fontSize: 13 } },
+          'Loading dials… (or backend unavailable — check plugins.enabled, gateway restart, plugin_api.py)')
+      : el('div', {},
+          el('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 } },
+            dialRow(d, '01', 'Edits', EDITS_POS[d.edits.value] ?? 12, (i) => api.sendRefresh('edits ' + nearest(EDITS_POS, i)),
+              el('span', { style: { color: '#4ade80', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } }, d.edits.value)),
+            dialRow(d, '02', 'Change scope', d.scope.value.length ? 8 : 0, () => api.send('scope show'),
+              el('span', { style: { color: '#d7e4ec', fontSize: 11 } }, d.scope.value.length ? d.scope.value.join(', ') : '(no limit)')),
+            dialRow(d, '03', 'Lines per turn', d.lines.value > 0 ? Math.round(Math.log2(d.lines.value + 1) / Math.log2(401) * (TICKS - 1)) : 0,
+              (i) => api.sendRefresh('lines ' + (i <= 0 ? 'off' : Math.max(1, Math.round(Math.pow(2, (i / (TICKS - 1)) * Math.log2(401)) - 1)))),
+              el('span', { style: { color: '#d7e4ec', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } },
+                d.lines.value > 0 ? String(d.lines.value) : 'off')),
+            dialRow(d, '04', 'New libraries', DEPS_POS[d.deps.value] ?? 12, (i) => api.sendRefresh('deps ' + nearest(DEPS_POS, i)),
+              el('span', { style: { color: '#4ade80', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } }, d.deps.value))),
+          presetChips(api.sendRefresh),
+          actionButtons(api.sendRefresh),
+          el('div', { style: { marginTop: 14, fontSize: 11, color: '#7c8890' } },
+            'Changes apply to the live session immediately and are enforced by the hooks on the next tool call.'))
     const fresh = el('div', { id: rootId, style: { padding: '24px 28px', maxWidth: 980, margin: '0 auto', color: '#d7e4ec', fontFamily: 'var(--ui-font-sans, system-ui)' } },
       el('div', { style: { marginBottom: 18 } },
         el('div', { style: { fontFamily: 'var(--ui-font-mono, monospace)', fontWeight: 700, fontSize: 26, letterSpacing: '.14em', color: '#4ade80' } }, 'AGENT MIXER'),
         el('div', { style: { fontSize: 12, color: '#7c8890', letterSpacing: '.28em', marginTop: 4 } },
-          '// STEERING CONSOLE — session ' + String((snapshot && snapshot.session) || '—'))))
-    if (!d) {
-      fresh.appendChild(el('div', { style: { color: '#fb923c', fontSize: 13 } },
-        'Loading dials… (or backend unavailable — check plugins.enabled, gateway restart, plugin_api.py)'))
-    } else {
-      fresh.appendChild(el('div', { style: { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 } },
-        dialRow(d, '01', 'Edits', EDITS_POS[d.edits.value] ?? 12, (i) => api.sendRefresh('edits ' + nearest(EDITS_POS, i)),
-          el('span', { style: { color: '#4ade80', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } }, d.edits.value)),
-        dialRow(d, '02', 'Change scope', d.scope.value.length ? 8 : 0, () => api.send('scope show'),
-          el('span', { style: { color: '#d7e4ec', fontSize: 11 } }, d.scope.value.length ? d.scope.value.join(', ') : '(no limit)')),
-        dialRow(d, '03', 'Lines per turn', d.lines.value > 0 ? Math.round(Math.log2(d.lines.value + 1) / Math.log2(401) * (TICKS - 1)) : 0,
-          (i) => api.sendRefresh('lines ' + (i <= 0 ? 'off' : Math.max(1, Math.round(Math.pow(2, (i / (TICKS - 1)) * Math.log2(401)) - 1)))),
-          el('span', { style: { color: '#d7e4ec', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } },
-            d.lines.value > 0 ? String(d.lines.value) : 'off')),
-        dialRow(d, '04', 'New libraries', DEPS_POS[d.deps.value] ?? 12, (i) => api.sendRefresh('deps ' + nearest(DEPS_POS, i)),
-          el('span', { style: { color: '#4ade80', fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 12 } }, d.deps.value))))
-      fresh.appendChild(presetChips(api.sendRefresh))
-      fresh.appendChild(actionButtons(api.sendRefresh))
-      fresh.appendChild(el('div', { style: { marginTop: 14, fontSize: 11, color: '#7c8890' } },
-        'Changes apply to the live session immediately and are enforced by the hooks on the next tool call.'))
-    }
+          '// STEERING CONSOLE — session ' + String((snapshot && snapshot.session) || '—'))),
+      body)
     morph(existing, fresh)
   }
   pageRepaint = repaint
