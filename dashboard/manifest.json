@@ -1,5 +1,5 @@
 {
-  "name": "agent-mixer",
+  "name": "hermes-agent-mixer",
   "label": "Agent Mixer",
   "description": "A mixing desk for how much your coding agent may change - edits, scope, lines and deps dials enforced in pre_tool_call, plus agent-mixer hooks for Claude Code, Codex and Gemini CLI",
   "icon": "sliders-horizontal",
