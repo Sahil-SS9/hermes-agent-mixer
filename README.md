@@ -17,6 +17,22 @@ Agent Mixer · sess_3f2a9c1e
 
 Requirements: Python 3.12+. Hermes needs a 2026-era build (hooks, plugin commands, subagent hooks). The CLI harnesses need only the `agent-mixer` command.
 
+## Harness support at a glance
+
+Agent Mixer is harness-agnostic: one engine, four adapters. The dials, presets, `/mixer` grammar and saved defaults are identical everywhere; only the enforcement transport differs.
+
+| Harness | Install | Enforcement | Notes |
+|---|---|---|---|
+| **Hermes** (first-class) | `hermes plugins install Sahil-SS9/hermes-agent-mixer --enable` | `pre_tool_call` hooks | + Desktop dial panel, web dashboard bar, status pill |
+| **Claude Code** | `agent-mixer install claude --yes` | `PreToolUse` + prompt hooks | native `ask` approvals; live-tested on 2.1.x |
+| **Codex** | `agent-mixer install codex --yes` | `PreToolUse` | `ask` becomes deny (Codex has no ask channel); trust the hook in `/hooks` |
+| **Gemini CLI** | `agent-mixer install gemini --yes` | `BeforeTool` | `ask` becomes deny; hook timeouts in ms |
+| **Any CLI** | `uv tool install .` or `pip install .` → `agent-mixer …` | shell command | works wherever you can run Python 3.12+ |
+
+The same engine enforces in every harness: plan/scope/lines/dep checks, per-turn budgets shared with subagents, session state, presets. `agent-mixer doctor` reports what is installed and what is wrong in any harness.
+
+**Hermes plugin catalog:** submitted for review (see the catalog entry PR link in this repo's pinned issue). Install by name `hermes plugins install hermes-agent-mixer` once merged.
+
 ## Screenshots
 
 **Composer icon and dial panel** — a sliders icon next to the model and reasoning controls opens the dial panel in place (Windows voice-equaliser style):
