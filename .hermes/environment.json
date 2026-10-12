@@ -1,0 +1,6 @@
+{
+  "recipe": "uv-pytest",
+  "test": "uv run --locked --group dashboard pytest -q",
+  "start": "uv run --locked python -c \"import hermes_agent_mixer, dashboard.plugin_api; print('mixer dashboard api importable')\"",
+  "ready": {"type": "log", "pattern": "importable"}
+}
