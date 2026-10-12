@@ -71,6 +71,7 @@ The slow tests, the receipts and the native-host test share one cached base Herm
 | `/mixer deps allow\|ask\|block` | Set the dependencies dial. |
 | `/mixer save` | Persist the current set as the saved defaults. |
 | `/mixer save <dial> <value>` | Set one saved default directly, with no session needed (`save deps block`, `save lines 40`, `save scope src/** docs/**`, `save scope add <glob>`). |
+| `/mixer preset builder\|auditor\|explorer\|surgical` | Apply a named bundle of all four dials at once (`preset show` lists them). |
 | `/mixer reset` | Drop this session's overrides, back to the saved defaults. |
 
 The same grammar works in a shell, and `/mixer` typed in any harness is handled by its prompt hook (the change is applied, the prompt is blocked, and the board comes back as the reason, so no model turn is spent):
@@ -80,6 +81,19 @@ agent-mixer [--session ID | --saved] <dial> <value>
 agent-mixer [--session ID] board
 agent-mixer ui [--session ID | --saved] [--port N] [--no-open]
 ```
+
+### Presets
+
+Four named bundles of all four dials, for the common working modes:
+
+| Preset | edits | scope | lines | deps |
+|---|---|---|---|---|
+| `builder` | auto | (no limit) | off | allow |
+| `auditor` | plan (read-only) | (no limit) | off | ask |
+| `explorer` | plan (read-only) | (no limit) | off | allow |
+| `surgical` | auto | `src/**`, `tests/**` | 30 | ask |
+
+Apply one with `/mixer preset <name>` (or `agent-mixer --saved preset <name>` to make it the default). A preset writes all four dials explicitly — it pins the bundle, it doesn't nudge what differs. `preset show` lists them; an unknown name changes nothing. Presets are shorthand for the same dial changes, so `/mixer reset` and the board work exactly as before.
 
 - With `--session ID` the change goes to that session (it need not have been seen yet). With `--saved` it edits the saved defaults. With neither, it acts on the latest session seen in the current folder and says which; if none has been seen it fails and suggests `--saved`.
 - Saved settings (Hermes): the plugin settings, written by the Desktop form and `ctx.set_config`. Saved settings (CLI harnesses): `$AGENT_MIXER_HOME/settings.json`, default `$XDG_CONFIG_HOME/agent-mixer/` (`%APPDATA%\agent-mixer\` on Windows). Per-session CLI state lives in `$AGENT_MIXER_HOME/state/`, default `$XDG_STATE_HOME/agent-mixer/` (`%LOCALAPPDATA%\agent-mixer\state\`). The two sets of saved values are separate; `agent-mixer doctor` says so.
@@ -228,6 +242,7 @@ New:
 - **X4, X5, X6** Claude Code, Codex and Gemini CLI hook adapters (Codex and Gemini contract-tested only; `ask` becomes deny there).
 - **X7** `agent-mixer install`, `uninstall` and `doctor`.
 - **X8** `agent-mixer ui`: a local browser steering console (loopback-only, token-guarded) over the same grammar and store; the four dials as segmented sliders with a live steering-policy JSON preview.
+- **X9** Presets: `/mixer preset builder|auditor|explorer|surgical` applies a named bundle of all four dials through the same target path (`preset show` lists them; unknown names change nothing).
 
 Compatibility: the `/mixer` grammar and the saved-setting keys are unchanged; saved 0.1 configs (including text `lines`) keep working.
 

@@ -16,7 +16,8 @@ import sys
 
 USAGE = """Usage:
   agent-mixer [--session ID | --saved] <dial> <value>   dials: edits ask|auto|plan, scope add|remove|clear <glob>,
-                                                        lines N|off, deps allow|ask|block, save <dial> <value>
+                                                      lines N|off, deps allow|ask|block, save <dial> <value>,
+                                                      preset builder|auditor|explorer|surgical (or preset show)
   agent-mixer [--session ID] board                       show the dials and where each value comes from
   agent-mixer hook claude|codex|gemini                    one hook event on stdin
   agent-mixer install|uninstall claude|codex|gemini [--project] [--yes] [--settings-json]
@@ -81,6 +82,20 @@ def _hook(args: list[str], stdin: str | None, environ) -> int:
     return code
 
 
+class _NoSession:
+    """A board target for commands that only read (preset show): refuses any change."""
+
+    name = "no session"
+
+    def effective(self):
+        from hermes_agent_mixer.core import settings
+
+        return settings.resolve({}, None, session=self.name)
+
+    def set(self, knob, value):
+        raise RuntimeError("no session")
+
+
 def _command(args: list[str], environ, here: str) -> int:
     from hermes_agent_mixer.core import board
     from hermes_agent_mixer.core.targets import SavedTarget, SessionTarget
@@ -108,7 +123,7 @@ def _command(args: list[str], environ, here: str) -> int:
     if not rest or (saved_mode and session):
         print(USAGE, file=sys.stderr)
         return 2
-    if rest[0] not in ("edits", "scope", "lines", "deps", "save", "reset", "board", "show"):
+    if rest[0] not in ("edits", "scope", "lines", "deps", "save", "preset", "reset", "board", "show"):
         print(f"agent-mixer: unknown command '{rest[0]}'\n{USAGE}", file=sys.stderr)
         return 2
     paths = Paths(environ)
@@ -130,13 +145,18 @@ def _command(args: list[str], environ, here: str) -> int:
             return 0
         mixer = make_mixer(paths)
         note = ""
-        if session is None:
+        show_only = rest[0] == "preset" and (len(rest) < 2 or rest[1] in ("show", "list"))
+        if session is None and not show_only:
             session = mixer.latest_session(here)
-            if session is None:
-                print("agent-mixer: no session has been seen in this folder yet. Use --session ID to name one, "
-                      "or --saved to change the saved defaults.", file=sys.stderr)
-                return 1
-            note = f"(session {session}, the latest seen in this folder)\n"
+        if session is None:
+            if show_only:
+                # `preset show` needs no session: it lists the bundles, it changes nothing.
+                print(board.handle_command(" ".join(rest), _NoSession()))
+                return 0
+            print("agent-mixer: no session has been seen in this folder yet. Use --session ID to name one, "
+                  "or --saved to change the saved defaults.", file=sys.stderr)
+            return 1
+        note = f"(session {session}, the latest seen in this folder)\n"
         target = SessionTarget(mixer, session, write_saved=lambda k, v: update_saved(paths, k, v))
         print(note + board.handle_command(" ".join(rest), target))
         return 0

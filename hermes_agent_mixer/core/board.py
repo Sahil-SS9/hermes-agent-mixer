@@ -11,11 +11,9 @@ from typing import Any
 
 from hermes_agent_mixer.core import settings
 
-USAGE = (
-    "Usage: /mixer [show] | /mixer edits ask|auto|plan | "
-    "/mixer scope add|remove|clear|show | /mixer lines N|off | "
-    "/mixer deps allow|ask|block | /mixer save [<dial> <value>] | /mixer reset"
-)
+USAGE = ("Usage: /mixer [show] | /mixer preset [show|<name>] | /mixer edits ask|auto|plan | "
+         "/mixer scope add|remove|clear|show | /mixer lines N|off | "
+         "/mixer deps allow|ask|block | /mixer save [<dial> <value>] | /mixer reset")
 
 
 class Refusal(Exception):
@@ -68,6 +66,8 @@ def handle_command(raw_args: str, target: Target) -> str:
             return _scope_command(target, args)
         if sub == "save":
             return _save(target, args)
+        if sub == "preset":
+            return _preset(target, args)
         if sub == "reset":
             return target.reset()
     except Refusal as refusal:
@@ -124,6 +124,17 @@ def _scope_command(target: Target, args: list[str]) -> str:
     if verb == "show" and len(args) == 1:
         return _scope_lines(target.effective())
     return f"scope needs add|remove|clear|show. {USAGE}"
+
+
+def _preset(target: Target, args: list[str]) -> str:
+    """`preset show` lists the bundles; `preset <name>` applies one (QW12)."""
+    from hermes_agent_mixer.core import presets
+
+    if not args or args[0] in ("show", "list"):
+        return presets.render_list()
+    if len(args) != 1:
+        return f"preset takes one name. Presets: {', '.join(presets.names())}."
+    return presets.apply(args[0], target)
 
 
 def _save(target: Target, args: list[str]) -> str:
