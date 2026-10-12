@@ -1,6 +1,12 @@
 {
-  "recipe": "uv-pytest",
-  "test": "uv run --locked --group dashboard pytest -q",
-  "start": "uv run --locked python -c \"import hermes_agent_mixer, dashboard.plugin_api; print('mixer dashboard api importable')\"",
-  "ready": {"type": "log", "pattern": "importable"}
+  "version": 1,
+  "recipe": {
+    "name": "Agent Mixer",
+    "kind": "python-uv",
+    "bootstrap": ["uv sync --locked --group dashboard"],
+    "build": [],
+    "test": ["env -u PYTHONPATH uv run --locked --group dashboard pytest -q"],
+    "start": null
+  },
+  "updatedAt": "2026-10-12T13:55:00Z"
 }
