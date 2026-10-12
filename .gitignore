@@ -9,3 +9,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Private planning docs — never publish
+ROADMAP*.md
+ROADMAP*.md.backup*
+TODO*.md
+NOTES*.md
