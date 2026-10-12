@@ -17,6 +17,22 @@ Agent Mixer · sess_3f2a9c1e
 
 Requirements: Python 3.12+. Hermes needs a 2026-era build (hooks, plugin commands, subagent hooks). The CLI harnesses need only the `agent-mixer` command.
 
+## Screenshots
+
+**Composer icon and dial panel** — a sliders icon next to the model and reasoning controls opens the dial panel in place (Windows voice-equaliser style):
+
+![Dial panel open from the composer icon](docs/screenshots/dial-panel-open.png)
+
+**Status pill** — the bottom-right pill shows the live dials (`auto · unscoped · lines off · ask`); clicking it opens the same panel.
+
+**Full console page** — the sidebar's Mixer Console row opens the retro steering console:
+
+![Console page](docs/screenshots/console-page.png)
+
+**Web dashboard** — the same panel lives under the chat input on the web dashboard (the chat:bottom mixer bar), plus the `/agent-mixer` tab:
+
+![Web dashboard](docs/screenshots/dashboard-tab.png)
+
 ## Install
 
 ### Hermes
