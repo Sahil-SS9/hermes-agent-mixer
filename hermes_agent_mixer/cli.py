@@ -65,7 +65,8 @@ def main(argv: list[str] | None = None, *, stdin: str | None = None, env: dict |
 
 
 def _hook(args: list[str], stdin: str | None, environ) -> int:
-    from hermes_agent_mixer.harness.common import HARNESSES as KNOWN, Paths, run_hook
+    from hermes_agent_mixer.harness.common import HARNESSES as KNOWN
+    from hermes_agent_mixer.harness.common import Paths, run_hook
 
     if len(args) != 1 or args[0] not in KNOWN:
         print(f"agent-mixer: hook needs one of {', '.join(KNOWN)}\n{USAGE}", file=sys.stderr)
@@ -83,8 +84,14 @@ def _hook(args: list[str], stdin: str | None, environ) -> int:
 def _command(args: list[str], environ, here: str) -> int:
     from hermes_agent_mixer.core import board
     from hermes_agent_mixer.core.targets import SavedTarget, SessionTarget
-    from hermes_agent_mixer.harness.common import (Paths, SettingsError, load_saved, make_mixer, store_saved,
-                                                   update_saved)
+    from hermes_agent_mixer.harness.common import (
+        Paths,
+        SettingsError,
+        load_saved,
+        make_mixer,
+        store_saved,
+        update_saved,
+    )
 
     session = None
     saved_mode = False
