@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from hermes_agent_mixer.core import board, settings
-from hermes_agent_mixer.core.mixer import Mixer
+from ..core import board, settings
+from ..core.mixer import Mixer
 
 
 class SessionTarget(board.Target):

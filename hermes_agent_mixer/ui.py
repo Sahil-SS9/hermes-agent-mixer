@@ -25,10 +25,10 @@ _JSON_TYPE = "application/json; charset=utf-8"
 
 def _session_target(paths, session: str | None, saved_mode: bool):
     """Build the board Target the same way cli._command does."""
-    from hermes_agent_mixer.core import board
-    from hermes_agent_mixer.core.store import file_lock
-    from hermes_agent_mixer.core.targets import SavedTarget, SessionTarget
-    from hermes_agent_mixer.harness.common import load_saved, make_mixer, store_saved
+    from .core import board
+    from .core.store import file_lock
+    from .core.targets import SavedTarget, SessionTarget
+    from .harness.common import load_saved, make_mixer, store_saved
 
     if saved_mode:
         def read():
@@ -50,15 +50,15 @@ def _session_target(paths, session: str | None, saved_mode: bool):
 
 
 def _update_saved(paths, key: str, value) -> None:
-    from hermes_agent_mixer.harness.common import update_saved
+    from .harness.common import update_saved
 
     update_saved(paths, key, value)
 
 
 def api_state(target, paths) -> dict:
     """Everything the page needs for one render: dials, sources, warnings, session name, versions."""
-    from hermes_agent_mixer import __version__
-    from hermes_agent_mixer.core import board, settings
+    from . import __version__
+    from .core import board, settings
 
     eff = target.effective()
     lines = eff.values["lines"]
@@ -84,7 +84,7 @@ def api_state(target, paths) -> dict:
 
 def api_command(target, raw_args: str) -> dict:
     """One /mixer-grammar command; the reply text is shown in the console log."""
-    from hermes_agent_mixer.core import board
+    from .core import board
 
     reply = board.handle_command(raw_args, target)
     return {"reply": reply, "ok": not reply.lower().startswith(("unknown", "usage")) and "needs" not in reply.lower()}
@@ -118,14 +118,22 @@ def make_handler(target, paths, token: str):
             origin = self.headers.get("Origin")
             site = self.headers.get("Sec-Fetch-Site")
             host = self.headers.get("Host") or ""
+            # The token rides every page load; a page served to a non-loopback Host
+            # (a proxy or a DNS-rebind to another name) must not get it. Loopback only.
+            port = self.server.server_address[1]
+            if host not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+                return False
             if origin:
                 return origin == f"http://{host}"
             return site in (None, "same-origin", "same-site", "none")
 
         def do_GET(self) -> None:
+            if not self._origin_ok():
+                _send(self, 403, b"cross-origin refused", "text/plain; charset=utf-8")
+                return
             url = urlparse(self.path)
             if url.path == "/":
-                from hermes_agent_mixer import ui_asset
+                from . import ui_asset
 
                 body = ui_asset.PAGE.replace("__TOKEN__", token).encode("utf-8")
                 _send(self, 200, body, _HTML_TYPE)
@@ -172,7 +180,7 @@ def run(argv: list[str], environ, here: str) -> int:
     import threading
     import webbrowser
 
-    from hermes_agent_mixer.harness.common import Paths
+    from .harness.common import Paths
 
     session: str | None = None
     saved_mode = False

@@ -14,7 +14,7 @@ import ntpath
 import os
 import sys
 
-from hermes_agent_mixer.core import fuzzy
+from ..core import fuzzy
 
 TERMINAL_CWD_SENTINELS = frozenset({"", ".", "./", "auto", "cwd"})
 

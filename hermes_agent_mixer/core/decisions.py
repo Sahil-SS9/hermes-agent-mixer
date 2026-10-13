@@ -10,8 +10,8 @@ from __future__ import annotations
 import posixpath
 from typing import Any
 
-from hermes_agent_mixer.core import depsguard, diffcount, scope as scope_mod, shell
-from hermes_agent_mixer.core.calls import Call, Decision
+from ..core import depsguard, diffcount, scope as scope_mod, shell
+from ..core.calls import Call, Decision
 
 NO_BYPASS = "Don't retry this through terminal or execute_code."
 

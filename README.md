@@ -128,7 +128,7 @@ Four named bundles of all four dials, for the common working modes:
 Apply one with `/mixer preset <name>` (or `agent-mixer --saved preset <name>` to make it the default). A preset writes all four dials explicitly — it pins the bundle, it doesn't nudge what differs. `preset show` lists them; an unknown name changes nothing. Presets are shorthand for the same dial changes, so `/mixer reset` and the board work exactly as before.
 
 - With `--session ID` the change goes to that session (it need not have been seen yet). With `--saved` it edits the saved defaults. With neither, it acts on the latest session seen in the current folder and says which; if none has been seen it fails and suggests `--saved`.
-- Saved settings (Hermes): the plugin settings, written by the Desktop form and `ctx.set_config`. Saved settings (CLI harnesses): `$AGENT_MIXER_HOME/settings.json`, default `$XDG_CONFIG_HOME/agent-mixer/` (`%APPDATA%\agent-mixer\` on Windows). Per-session CLI state lives in `$AGENT_MIXER_HOME/state/`, default `$XDG_STATE_HOME/agent-mixer/` (`%LOCALAPPDATA%\agent-mixer\state\`). The two sets of saved values are separate; `agent-mixer doctor` says so.
+- Hermes session overrides and turn budgets live under the host-resolved `$HERMES_HOME/plugin-data/hermes-agent-mixer/sessions/`, shared by hooks and panel backend. Saved Hermes defaults are written through the host's namespaced plugin-config facade (including managed-setting guards). CLI harnesses retain their independent `$AGENT_MIXER_HOME` / XDG stores.
 - Saved keys: `edits`, `scope`, `lines` (an int, `0` = off; the 0.1 text forms `"off"` and `"50"` still load), `deps`, and `extra_write_tools`.
 
 ### Desktop settings
@@ -140,7 +140,7 @@ The manifest declares every setting with a label, a description and its type, so
 The console ships as a **unified package**: this repo's `desktop/plugin.js` and `dashboard/plugin_api.py` load natively into the Desktop app and web dashboard — no browser tab, no separate server.
 
 - **Status bar (Desktop):** a live pill showing the dials at a glance (`auto · scoped · 30 left · ask`). Click it to open the console.
-- **Console page (Desktop + Dashboard):** the retro sliders as native app UI, at `Agent Mixer` in the sidebar (or `/agent-mixer`). Every change goes through the same grammar and store as the CLI, and is enforced by the hooks on the next tool call.
+- **Console page (Desktop + Dashboard):** the retro sliders as native app UI, at `Agent Mixer` in the sidebar (or `/agent-mixer`). Panels use the same command grammar as the CLI, but share the Hermes hook store—not the separate CLI-harness store. The dashboard bar/page explicitly edits Hermes saved defaults, not the current chat: these affect sessions without an override on the next tool call. Desktop panel actions bind to the focused chat's durable session id and are enforced by Hermes hooks on the next tool call. Older Desktop hosts without that id refuse panel changes.
 - **Settings ▸ Plugins:** the manifest's `config_schema` renders there automatically; saving writes the saved defaults the same way `ctx.set_config()` does.
 
 Install (unified package): put this repo at `~/.hermes/plugins/hermes-agent-mixer/` (or symlink it), add `hermes-agent-mixer` to `plugins.enabled` in `config.yaml`, then run `hermes dashboard` and/or the Desktop app. Enable the desktop half in Capabilities → Plugins (it ships off by default, like every desktop half). `ctx.rest` returning 404 means the backend isn't mounted: check `plugins.enabled` and restart the gateway.

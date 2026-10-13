@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes_agent_mixer.core import board, settings
+from ..core import board, settings
 
 #: name -> dial overrides, applied in DIALS order. Every value must pass settings.coerce.
 PRESETS: dict[str, dict[str, Any]] = {

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import os
 
-from hermes_agent_mixer.core import fuzzy
-from hermes_agent_mixer.core.ports import Ports, env_workspace
-from hermes_agent_mixer.hermes import host
+from ..core import fuzzy
+from ..core.ports import Ports, env_workspace
+from ..hermes import host
 
 
 class HermesPorts(Ports):

@@ -11,8 +11,8 @@ import os
 from fnmatch import fnmatchcase
 from typing import Any
 
-from hermes_agent_mixer.core.calls import Call
-from hermes_agent_mixer.harness.common import Event, mixer_command_args, write_call
+from ..core.calls import Call
+from ..harness.common import Event, mixer_command_args, write_call
 
 NAME = "codex"
 DISPLAY = "Codex"

@@ -74,9 +74,11 @@ def fragment_names(path_name: str, text: str | None) -> set[str]:
     elif name.startswith("requirements") and name.endswith(".txt"):
         names = set(_requirements_names(body) or ())
     elif name == "cargo.toml":
-        names = {m for m in re.findall(r"^\s*([A-Za-z0-9_-]+)\s*=", body, re.M) if m.lower() not in _NOT_DEPS}
+        # Teknium review: ^\s* with re.M backtracks quadratically on a file of blank
+        # lines (8.8s on 40k newlines); ^[ \t]* is linear and byte-identical here.
+        names = {m for m in re.findall(r"^[ \t]*([A-Za-z0-9_-]+)\s*=", body, re.M) if m.lower() not in _NOT_DEPS}
     elif name == "go.mod":
-        names = {m for m in re.findall(r"^\s*(?:require\s+)?([A-Za-z0-9][^\s/]*/[^\s]+)\s+v", body, re.M)}
+        names = {m for m in re.findall(r"^[ \t]*(?:require\s+)?([A-Za-z0-9][^\s/]*/[^\s]+)\s+v", body, re.M)}
     return {n.lower() if name.startswith("requirements") or name == "pyproject.toml" else n for n in names}
 
 

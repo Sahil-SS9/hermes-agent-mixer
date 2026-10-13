@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from hermes_agent_mixer.harness import claude, codex, gemini
+from ..harness import claude, codex, gemini
 
 MARKER = "agent-mixer"
 TIMEOUT_SECONDS = 10

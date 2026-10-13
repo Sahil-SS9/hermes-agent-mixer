@@ -17,11 +17,11 @@ import time
 from threading import RLock
 from typing import Any
 
-from hermes_agent_mixer.core import board, settings
-from hermes_agent_mixer.core.mixer import Mixer
-from hermes_agent_mixer.core.store import MemoryStore
-from hermes_agent_mixer.hermes import host, tools
-from hermes_agent_mixer.hermes.ports import HermesPorts
+from ..core import board, settings
+from ..core.mixer import Mixer
+from ..core.store import StoreLockTimeout
+from ..hermes import host, tools, storage
+from ..hermes.ports import HermesPorts
 
 log = logging.getLogger("agent_mixer")
 
@@ -57,8 +57,9 @@ def _saved() -> dict:
 def get_mixer() -> Mixer:
     """The process-wide Mixer (created lazily so tests can drive it)."""
     global _MIXER
-    if _MIXER is None:
-        _MIXER = Mixer(MemoryStore(), _saved, clock=lambda: _now())
+    store = storage.state_store()
+    if _MIXER is None or getattr(_MIXER.store, "root", None) != store.root:
+        _MIXER = Mixer(store, _saved, clock=lambda: _now())
     return _MIXER
 
 
@@ -93,7 +94,11 @@ def _pre_tool_call(tool_name: str = "", args: dict | None = None, task_id: str =
     call = tools.to_call(tool_name, args, _extra_globs())
     if call is None:
         return None
-    decision = get_mixer().decide(_session(session_id, task_id), call, HermesPorts(), task_id=task_id or None)
+    try:
+        decision = get_mixer().decide(_session(session_id, task_id), call, HermesPorts(), task_id=task_id or None)
+    except (RuntimeError, OSError, StoreLockTimeout):
+        log.exception("agent-mixer: shared Hermes state is unavailable")
+        return {"action": "block", "reason": "Agent Mixer state is unavailable; tool call refused."}
     return tools.to_directive(decision)
 
 

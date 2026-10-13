@@ -64,7 +64,7 @@ def test_parallel_calls_cannot_both_take_the_last_line(tmp_path, monkeypatch):
     assert original_used("s", "t") == 1
 
 
-def test_unload_reload_rebinds_saved_defaults_and_discards_budget(tmp_path, monkeypatch, fake_ctx):
+def test_unload_reload_rebinds_defaults_but_preserves_session_policy(tmp_path, monkeypatch, fake_ctx):
     monkeypatch.chdir(tmp_path)
     plugin.reset_mixer()
     try:
@@ -79,6 +79,8 @@ def test_unload_reload_rebinds_saved_defaults_and_discards_budget(tmp_path, monk
         new_ctx = type(fake_ctx)({"edits": "auto", "lines": 1})
         plugin.register(new_ctx)
         fresh = plugin.get_mixer().effective("s")
-        assert fresh["edits"] == "auto" and fresh["lines"] == 1 and fresh.left == 1
+        assert fresh["edits"] == "ask" and fresh["lines"] == 1 and fresh.left == 1
+        plugin.get_mixer().reset_session("s")
+        assert plugin.get_mixer().effective("s")["edits"] == "auto"
     finally:
         plugin.reset_mixer()

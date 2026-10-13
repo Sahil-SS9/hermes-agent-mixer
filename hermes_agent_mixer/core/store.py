@@ -1,7 +1,7 @@
 """Session state behind one interface (D9).
 
-``MemoryStore`` serves Hermes (one long-lived process). ``FileStore`` serves the CLI harnesses, where
-every hook is a separate process: one store-wide lock (``fcntl.flock(LOCK_EX)`` on the fixed file
+``MemoryStore`` supports in-process consumers. ``FileStore`` serves Hermes hooks/panels and CLI
+harnesses across processes: one store-wide lock (``fcntl.flock(LOCK_EX)`` on the fixed file
 ``<state dir>/.lock``, ``msvcrt.locking`` on Windows) is held while state is read or changed (X3),
 and state files are replaced atomically.
 
@@ -138,9 +138,10 @@ def file_lock(path: str, wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
 class FileStore:
     """One JSON file per session under ``root``; one fixed ``.lock`` file for the whole store."""
 
-    def __init__(self, root: str | os.PathLike, lock_wait: float = LOCK_WAIT_SECONDS) -> None:
+    def __init__(self, root: str | os.PathLike, lock_wait: float = LOCK_WAIT_SECONDS, *, strict: bool = False) -> None:
         self.root = os.fspath(root)
         self.lock_wait = lock_wait
+        self.strict = strict
 
     def path_of(self, sid: str) -> str:
         return os.path.join(self.root, hashlib.sha256(sid.encode("utf-8")).hexdigest()[:32] + ".json")
@@ -166,8 +167,15 @@ class _FileTx(Tx):
         try:
             with open(self._store.path_of(sid), encoding="utf-8") as handle:
                 data = json.load(handle)
-            return data.get("record") if isinstance(data, dict) else None
-        except (OSError, ValueError):
+            record = data.get("record") if isinstance(data, dict) else None
+            if self._store.strict and (not isinstance(record, dict) or not isinstance(record.get("overrides"), dict)):
+                raise RuntimeError("Agent Mixer session state is malformed")
+            return record
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as exc:
+            if self._store.strict:
+                raise RuntimeError("Agent Mixer session state cannot be read") from exc
             return None
 
     def get(self, sid: str) -> dict | None:

@@ -1,17 +1,16 @@
 """Agent Mixer dashboard plugin — backend API routes, mounted at /api/plugins/agent-mixer/.
 
-Every handler is a thin wrapper around the same code paths the CLI uses
-(``core.board`` + ``core.targets`` over ``harness.common.make_mixer``), so the
-dashboard console cannot drift from ``agent-mixer`` on the command line or
-``/mixer`` in chat. State lives in the one CLI store (``$AGENT_MIXER_HOME`` /
-XDG defaults), so a change made here is enforced by the hooks immediately.
+Panels and Hermes hooks share session state under the host-resolved
+``HERMES_HOME/plugin-data/hermes-agent-mixer/sessions/``. Saved defaults use
+Hermes's namespaced PluginContext config facade. CLI harness stores remain
+separate. The dashboard tab edits Hermes saved defaults; Desktop sends the
+focused durable session id. Missing host facilities fail closed.
 
 Imported only by the web dashboard server process (fastapi is a server
 dependency, not a plugin runtime dependency). This file must expose ``router``.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,44 +27,39 @@ from pydantic import BaseModel, Field
 
 from hermes_agent_mixer.core import board
 from hermes_agent_mixer.core import presets as presets_mod
-from hermes_agent_mixer.core.store import file_lock
-from hermes_agent_mixer.harness.common import (
-    SettingsError,
-    load_saved,
-    make_mixer,
-    update_saved,
-)
+from hermes_agent_mixer.core import settings
+from hermes_agent_mixer.core.mixer import Mixer
+from hermes_agent_mixer.hermes import storage
+from hermes_agent_mixer.harness.common import SettingsError
 
 router = APIRouter()
 
 
-def _paths():
-    from hermes_agent_mixer.harness.common import Paths
-
-    return Paths(dict(os.environ))
-
-
 def _target(session: str | None, saved: bool):
-    """The board Target for this request — the exact objects the CLI builds."""
+    """Panels and hooks share Hermes session records and host-owned defaults."""
     from hermes_agent_mixer.core.targets import SavedTarget, SessionTarget
 
-    paths = _paths()
-    if saved:
-        def read():
-            return load_saved(paths)
-
-        def write(data):
-            with file_lock(paths.settings_file + ".lock"):
-                # store_saved imported lazily to mirror cli._command
-                from hermes_agent_mixer.harness.common import store_saved
-
-                store_saved(paths, data)
-
-        return SavedTarget(read, write), paths
-    mixer = make_mixer(paths)
-    if not session:
+    if not saved and not (session or "").strip():
         raise HTTPException(status_code=400, detail="session is required unless saved=true")
-    return SessionTarget(mixer, session, write_saved=lambda k, v: update_saved(paths, k, v)), paths
+    try:
+        store = storage.state_store()
+        ctx = storage.config_context()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Hermes state/config is unavailable; no changes applied") from exc
+
+    def read():
+        return {key: value for key in settings.SAVED_KEYS
+                if (value := ctx.get_config(key, None)) is not None}
+
+    class HostSavedTarget(SavedTarget):
+        def set(self, knob, value):
+            ctx.set_config(knob, value)
+            return " (saved: sessions without an override use this default)"
+
+    if saved:
+        # Each command writes only its own key; never replay a stale config snapshot.
+        return HostSavedTarget(read, lambda _data: None), None
+    return SessionTarget(Mixer(store, read), (session or "").strip(), write_saved=ctx.set_config), None
 
 
 def _state_payload(target, session_label: str) -> dict[str, Any]:

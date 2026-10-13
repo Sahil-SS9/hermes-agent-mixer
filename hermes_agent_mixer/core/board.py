@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hermes_agent_mixer.core import settings
+from ..core import settings
 
 USAGE = ("Usage: /mixer [show] | /mixer preset [show|<name>] | /mixer edits ask|auto|plan | "
          "/mixer scope add|remove|clear|show | /mixer lines N|off | "
@@ -128,7 +128,7 @@ def _scope_command(target: Target, args: list[str]) -> str:
 
 def _preset(target: Target, args: list[str]) -> str:
     """`preset show` lists the bundles; `preset <name>` applies one (QW12)."""
-    from hermes_agent_mixer.core import presets
+    from ..core import presets
 
     if not args or args[0] in ("show", "list"):
         return presets.render_list()

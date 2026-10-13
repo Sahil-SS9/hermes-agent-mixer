@@ -2,7 +2,6 @@
 same grammar). Runs against a throwaway home via the tests.cli_driver rig."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -22,7 +21,15 @@ def api_module(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(repo / "dashboard"))
     import dashboard.plugin_api as api
 
+    from tests.conftest import FakeCtx
+    from hermes_agent_mixer.hermes import storage, plugin
+    ctx = FakeCtx()
+    monkeypatch.setattr(storage, "config_context", lambda: ctx)
+    api.test_context = ctx
+    plugin.reset_mixer()
+    plugin.register(ctx)
     yield api
+    plugin.reset_mixer()
     sys.modules.pop("dashboard.plugin_api", None)
 
 
@@ -49,9 +56,8 @@ def test_command_applies_and_state_follows(api_module, tmp_path):
     res = api_module.post_command(api_module.CommandBody(command="edits plan", session="D2"))
     assert res["ok"] and "plan" in res["reply"]
     assert res["state"]["dials"]["edits"]["value"] == "plan"
-    # the same store the CLI reads
-    _rc, out, _ = rig_run(tmp_path, ["--session", "D2", "board"])
-    assert "plan" in out
+    from hermes_agent_mixer.hermes import plugin
+    assert plugin.get_mixer().effective("D2")["edits"] == "plan"
 
 
 def test_command_saved_targets_the_saved_file(api_module, tmp_path):
@@ -59,8 +65,7 @@ def test_command_saved_targets_the_saved_file(api_module, tmp_path):
     os.chdir(proj)
     res = api_module.post_command(api_module.CommandBody(command="lines 40", saved=True))
     assert res["ok"]
-    saved = Path(os.environ["AGENT_MIXER_HOME"]) / "settings.json"
-    assert json.loads(saved.read_text())["lines"] == 40
+    assert api_module.test_context.get_config("lines") == 40
     assert res["state"]["saved_mode"] is True
 
 
@@ -97,9 +102,8 @@ def rig_run(tmp_path, argv):
     return rc, out or err, err
 
 
-def test_backend_matches_cli_board(api_module, tmp_path, monkeypatch):
-    """The dashboard /state and the CLI board must agree — the no-drift guarantee.
-    Both sides pointed at the SAME AGENT_MIXER_HOME for this test."""
+def test_backend_matches_hook_board(api_module, tmp_path, monkeypatch):
+    """The dashboard /state and the Hermes hook must share the same session dials."""
     monkeypatch.setenv("XDG_STATE_HOME", str(Path(os.environ["AGENT_MIXER_HOME"]).parent / "xdg-state"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(Path(os.environ["AGENT_MIXER_HOME"]).parent / "xdg-cfg"))
     proj = _mkproj(tmp_path)
@@ -108,13 +112,6 @@ def test_backend_matches_cli_board(api_module, tmp_path, monkeypatch):
     data = api_module.get_state(session="X")
     assert data["dials"]["scope"]["value"] == ["src/**", "tests/**"]
     assert data["dials"]["lines"]["value"] == 30
-    # the CLI sees the same session state (same store root)
-    from tests.cli_driver import Rig
-
-    rig = Rig(tmp_path / "rig-shell")
-    _rc, board, _err = rig.run(["--session", "X", "board"], cwd=str(proj),
-                             extra_env={"XDG_STATE_HOME": os.environ["XDG_STATE_HOME"],
-                                        "XDG_CONFIG_HOME": os.environ["XDG_CONFIG_HOME"],
-                                        "AGENT_MIXER_HOME": os.environ["AGENT_MIXER_HOME"]})
-    for needle in ("src/**, tests/**", "30"):
-        assert needle in board, (needle, board[:300])
+    from hermes_agent_mixer.hermes import plugin
+    eff = plugin.get_mixer().effective("X")
+    assert eff["scope"] == ["src/**", "tests/**"] and eff["lines"] == 30

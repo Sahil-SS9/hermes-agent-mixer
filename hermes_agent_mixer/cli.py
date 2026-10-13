@@ -30,7 +30,7 @@ HARNESSES = ("claude", "codex", "gemini")
 
 
 def _version() -> str:
-    from hermes_agent_mixer import __version__
+    from . import __version__
 
     return __version__
 
@@ -51,23 +51,23 @@ def main(argv: list[str] | None = None, *, stdin: str | None = None, env: dict |
     if args[0] == "hook":
         return _hook(args[1:], stdin, environ)
     if args[0] in ("install", "uninstall"):
-        from hermes_agent_mixer.harness import install
+        from .harness import install
 
         return install.run(args[0], args[1:], environ, here)
     if args[0] == "doctor":
-        from hermes_agent_mixer.harness import doctor
+        from .harness import doctor
 
         return doctor.run(environ, here)
     if args[0] == "ui":
-        from hermes_agent_mixer import ui
+        from . import ui
 
         return ui.run(args[1:], environ, here)
     return _command(args, environ, here)
 
 
 def _hook(args: list[str], stdin: str | None, environ) -> int:
-    from hermes_agent_mixer.harness.common import HARNESSES as KNOWN
-    from hermes_agent_mixer.harness.common import Paths, run_hook
+    from .harness.common import HARNESSES as KNOWN
+    from .harness.common import Paths, run_hook
 
     if len(args) != 1 or args[0] not in KNOWN:
         print(f"agent-mixer: hook needs one of {', '.join(KNOWN)}\n{USAGE}", file=sys.stderr)
@@ -88,7 +88,7 @@ class _NoSession:
     name = "no session"
 
     def effective(self):
-        from hermes_agent_mixer.core import settings
+        from .core import settings
 
         return settings.resolve({}, None, session=self.name)
 
@@ -97,9 +97,9 @@ class _NoSession:
 
 
 def _command(args: list[str], environ, here: str) -> int:
-    from hermes_agent_mixer.core import board
-    from hermes_agent_mixer.core.targets import SavedTarget, SessionTarget
-    from hermes_agent_mixer.harness.common import (
+    from .core import board
+    from .core.targets import SavedTarget, SessionTarget
+    from .harness.common import (
         Paths,
         SettingsError,
         load_saved,
@@ -130,7 +130,7 @@ def _command(args: list[str], environ, here: str) -> int:
     try:
         if saved_mode:
             def write(data):
-                from hermes_agent_mixer.core.store import file_lock
+                from .core.store import file_lock
 
                 with file_lock(paths.settings_file + ".lock"):
                     store_saved(paths, data)

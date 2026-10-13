@@ -9,9 +9,9 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from hermes_agent_mixer.core import decisions, settings
-from hermes_agent_mixer.core.calls import Call, Decision
-from hermes_agent_mixer.core.store import MemoryStore
+from ..core import decisions, settings
+from ..core.calls import Call, Decision
+from ..core.store import MemoryStore
 
 MAX_DEPTH = 16
 

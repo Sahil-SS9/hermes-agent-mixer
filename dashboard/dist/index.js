@@ -97,7 +97,7 @@
 
   async function refresh() {
     try {
-      const res = await fetch("/api/plugins/hermes-agent-mixer/state?session=dashboard", {
+      const res = await fetch("/api/plugins/hermes-agent-mixer/state?saved=true", {
         credentials: "same-origin",
         headers: authHeaders(),
       });
@@ -112,7 +112,7 @@
       const res = await fetch("/api/plugins/hermes-agent-mixer/command", {
         method: "POST", credentials: "same-origin",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ command, session: "dashboard" }),
+        body: JSON.stringify({ command, saved: true }),
       });
       const data = await res.json();
       if (data.state) state = data.state;
@@ -235,10 +235,9 @@
         })),
       h("div", { style: { display: "flex", gap: 10, marginTop: 10 } },
         h("button", { className: "amx-btn amx-btn-action", onClick: function () { send("preset show"); } }, "List presets"),
-        h("button", { className: "amx-btn amx-btn-action", onClick: function () { send("reset"); } }, "Reset session dials"),
-        h("button", { className: "amx-btn primary", onClick: function () { send("save"); } }, "Save as default")),
+        h("span", { style: { fontSize: 11 } }, "Changes are saved as Hermes defaults automatically.")),
       h("div", { style: { marginTop: 12, fontSize: 11, color: "var(--muted-foreground, #6b7280)" } },
-        "Changes apply to the dashboard session immediately and are enforced by the hooks on the next tool call."));
+        "Hermes saved defaults, not this chat: applied on the next tool call unless the session has an override. Use /mixer in chat for session controls."));
   }
 
   // ------------------------------------------------------------------ composer-adjacent bar
@@ -279,7 +278,7 @@
           onClick: function () { setOpen(function (v) { return !v; }); } }, "⇋"),
         h("span", { className: "amx-cbar-label" }, "AGENT MIXER"),
         h("span", { className: "amx-cbar-summary" }, summary),
-        h("span", { className: "amx-cbar-hint" }, "changes apply to this session immediately")),
+        h("span", { className: "amx-cbar-hint" }, "edits the saved defaults")),
       open
         ? h("div", { className: "amx-cbar-panel" },
             compactDialRow("01", "Edits", "edits",

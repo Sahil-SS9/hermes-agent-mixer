@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import sys
 
-from hermes_agent_mixer.core import settings
-from hermes_agent_mixer.core.store import FileStore, StoreLockTimeout
-from hermes_agent_mixer.harness import install
-from hermes_agent_mixer.harness.common import HARNESSES, Paths, SettingsError, load_saved
+from ..core import settings
+from ..core.store import FileStore, StoreLockTimeout
+from ..harness import install
+from ..harness.common import HARNESSES, Paths, SettingsError, load_saved
 
 
 def _installed(name: str, home: str, here: str) -> list[str]:
@@ -28,7 +28,7 @@ def _installed(name: str, home: str, here: str) -> list[str]:
 
 
 def run(environ, here: str) -> int:
-    from hermes_agent_mixer import __version__
+    from .. import __version__
 
     paths = Paths(environ)
     home = paths.user_home

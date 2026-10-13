@@ -10,8 +10,8 @@ import difflib
 from dataclasses import dataclass
 from typing import Any
 
-from hermes_agent_mixer.core import patches
-from hermes_agent_mixer.core.calls import Call
+from ..core import patches
+from ..core.calls import Call
 
 
 @dataclass

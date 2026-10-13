@@ -200,8 +200,11 @@ _TAG_READ_FLAGS = {"-l", "--list", "-n", "--sort", "--contains", "--no-contains"
 _CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--list", "-l", "--local", "--global", "--system",
                       "--show-origin", "--show-scope", "--null", "-z", "--name-only", "--includes", "--no-includes"}
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Disjoint address/command alternatives avoid ambiguous whitespace backtracking.
+# Strip each command before fullmatch; terminal decisions hold the store lock.
+_ADDR = r"(?:\d+|\$|/[^/]*/)"
 _SED_SCRIPT = re.compile(
-    r"\s*(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?\s*!?\s*(?:[pPdq=l]|s/[^/]*/[^/]*/[gpiI0-9]*)\s*")
+    r"(?:" + _ADDR + r"(?:," + _ADDR + r")?\s*)?(?:!\s*)?(?:[pPdq=l]|s/[^/]*/[^/]*/[gpiI0-9]*)")
 
 
 def _flag_of(token: str) -> str:
@@ -310,7 +313,8 @@ def _read_only_sed(args: list[str]) -> bool:
         pass  # a script without -n prints and never writes; the script check below is what matters
     for script in scripts:
         for part in re.split(r"[;\n]", script):
-            if part.strip() and not _SED_SCRIPT.fullmatch(part):
+            stripped = part.strip()
+            if stripped and not _SED_SCRIPT.fullmatch(stripped):
                 return False
     return True
 

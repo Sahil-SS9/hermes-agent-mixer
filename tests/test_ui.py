@@ -176,3 +176,15 @@ def test_usage_lists_ui():
     from hermes_agent_mixer import cli
 
     assert "agent-mixer ui" in cli.USAGE
+
+
+@pytest.mark.parametrize("host", ["evil.example:8377", "127.0.0.1.evil.example:8377", "localhost:1", "127.0.0.1", "127.0.0.1:1"])
+def test_rebinding_host_cannot_receive_token(ui, host):
+    code, body, _ = ui.get("/", {"Host": host})
+    assert code == 403 and b"const TOKEN" not in body
+
+
+def test_localhost_matching_port_can_receive_page(ui):
+    port = ui.url.rsplit(":", 1)[1]
+    code, body, _ = ui.get("/", {"Host": "localhost:" + port})
+    assert code == 200 and b"const TOKEN" in body

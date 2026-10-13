@@ -52,6 +52,7 @@ def available() -> dict[str, bool]:
         "gateway.session_context": _function("gateway.session_context", "get_session_env") is not None,
         "tools.file_tools_paths": _function("tools.file_tools_paths", "_resolve_path_for_task") is not None,
         "tools.fuzzy_match": _function("tools.fuzzy_match", "fuzzy_find_and_replace") is not None,
+        "hermes_constants.get_hermes_home": _function("hermes_constants", "get_hermes_home") is not None,
     }
 
 
@@ -102,3 +103,22 @@ def fuzzy_replace(content: str, old: str, new: str, replace_all: bool) -> str | 
 
 def has_fuzzy() -> bool:
     return _function("tools.fuzzy_match", "fuzzy_find_and_replace") is not None
+
+
+def hermes_home() -> str | None:
+    """The host's Hermes home (``hermes_constants.get_hermes_home()``), or None.
+
+    Host resolves: context-local override → ``HERMES_HOME`` env → platform default. Used
+    for the one shared data root (plugin-data/<plugin>) so panels and hooks store state
+    in the same directory this process resolves.
+    """
+    getter = _function("hermes_constants", "get_hermes_home")
+    if getter is None:
+        value = os.environ.get("HERMES_HOME", "")
+        return value if value and os.path.isabs(value) else None
+    try:
+        value = str(getter())
+    except Exception:  # noqa: BLE001
+        log.debug("agent-mixer: get_hermes_home failed", exc_info=True)
+        return None
+    return value if value and os.path.isabs(value) else None

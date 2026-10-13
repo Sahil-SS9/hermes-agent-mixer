@@ -48,10 +48,11 @@ class FakeCtx:
 
 
 @pytest.fixture(autouse=True)
-def hermetic_environment(monkeypatch):
+def hermetic_environment(monkeypatch, tmp_path):
     """No test may inherit a host workspace or session from the shell that runs pytest."""
     for var in ("TERMINAL_CWD", "HERMES_SESSION_ID", "HERMES_SESSION_KEY", "AGENT_MIXER_HOME"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
 
 
 @pytest.fixture

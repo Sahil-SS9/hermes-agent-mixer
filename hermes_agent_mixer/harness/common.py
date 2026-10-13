@@ -12,12 +12,12 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from hermes_agent_mixer.core import board, settings
-from hermes_agent_mixer.core.calls import Call, Decision
-from hermes_agent_mixer.core.mixer import Mixer
-from hermes_agent_mixer.core.ports import Ports
-from hermes_agent_mixer.core.store import FileStore, file_lock
-from hermes_agent_mixer.core.targets import SessionTarget
+from ..core import board, settings
+from ..core.calls import Call, Decision
+from ..core.mixer import Mixer
+from ..core.ports import Ports
+from ..core.store import FileStore, file_lock
+from ..core.targets import SessionTarget
 
 HARNESSES = ("claude", "codex", "gemini")
 IDLE_SECONDS = 7 * 24 * 3600.0
@@ -133,7 +133,7 @@ def degrade_message(decision: Decision, display: str) -> str:
 
 
 def load_harness(name: str):
-    return importlib.import_module(f"hermes_agent_mixer.harness.{name}")
+    return importlib.import_module(f".{name}", __package__)
 
 
 def run_hook(name: str, raw: str, paths: Paths, environ: dict[str, str] | None = None) -> tuple[int, str, str]:

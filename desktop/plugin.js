@@ -48,22 +48,29 @@ let pageRepaint = null // set by the page render; the poll calls it while the pa
 let lastReply = null // { ok, text } — persisted across panel rebuilds so the status line survives
 
 function makeApi(ctx) {
+  // Teknium review: never invent a session id ('SESS-DESKTOP' wrote a phantom store
+  // record the hooks would never read). The durable id the hooks actually receive is
+  // host.state.focusedStoredSessionId; focusedSessionId is the ephemeral runtime uuid.
+  // With nothing focused, panel actions are refused with an explanation instead.
   const sessionOf = () => {
     try {
-      const focused = host.state.focusedSessionId.get()
+      const focused = host.state.focusedStoredSessionId.get()
       if (focused) return focused
     } catch { /* host.state can be unreachable early — fall through */ }
-    return 'SESS-DESKTOP'
+    return null
   }
   const send = async (command) => {
+    const session = sessionOf()
+    if (!session) return { ok: false, text: 'no focused session in the desktop yet — focus a chat first' }
     try {
       const res = await ctx.rest('/command', {
         method: 'POST',
         // The desktop bridge serialises opts.body itself — pass the OBJECT (a pre-stringified
         // body arrives as a JSON string and FastAPI rejects it with 422).
-        body: { command, session: sessionOf() },
+        body: { command, session },
         timeoutMs: 8000,
       })
+      if (sessionOf() !== session) { snapshot = null; return { ok: false, text: "focused chat changed; refresh the panel" } }
       if (res && res.state && res.state.dials) snapshot = res.state
       return { ok: res && res.ok !== false, text: (res && res.reply) || 'done' }
     } catch (error) {
@@ -71,12 +78,20 @@ function makeApi(ctx) {
     }
   }
   const get = async () => {
+    const session = sessionOf()
+    if (!session) {
+      snapshot = null
+      return { error: 'no focused session in the desktop yet — focus a chat first' }
+    }
+    if (snapshot && snapshot.session !== session) snapshot = null
     try {
-      const data = await ctx.rest('/state?session=' + encodeURIComponent(sessionOf()) + '&saved=false', { timeoutMs: 8000 })
+      const data = await ctx.rest('/state?session=' + encodeURIComponent(session) + '&saved=false', { timeoutMs: 8000 })
+      if (sessionOf() !== session) { snapshot = null; return { error: "focused chat changed; refresh the panel" } }
       if (data && data.dials) snapshot = data
       return snapshot
     } catch (error) {
-      return snapshot || { error: String((error && error.message) || error) }
+      snapshot = null
+      return { error: String((error && error.message) || error) }
     }
   }
   const sendRefresh = async (command) => {

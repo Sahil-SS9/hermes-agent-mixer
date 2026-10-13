@@ -12,6 +12,6 @@ __version__ = "0.2.0"
 
 def register(ctx):
     """Hermes plugin entry point (``hermes_agent.plugins`` group)."""
-    from hermes_agent_mixer.hermes.plugin import register as _register
+    from .hermes.plugin import register as _register
 
     _register(ctx)

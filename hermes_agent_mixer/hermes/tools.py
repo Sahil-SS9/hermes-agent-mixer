@@ -4,7 +4,7 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from typing import Any
 
-from hermes_agent_mixer.core.calls import Call, Decision
+from ..core.calls import Call, Decision
 
 _PATH_KEYS = ("path", "file_path", "filename", "target")
 _TEXT_KEYS = ("content", "text", "data")
